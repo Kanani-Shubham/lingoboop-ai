@@ -1,0 +1,64 @@
+{
+  "character_id": "leo",
+  "display_name": "Leo",
+  "species": "Lion",
+  "theme_color": "#9a6a06",
+  "model_file": "leo.glb",
+  "format": "glTF 2.0 Binary (GLB)",
+  "rig_type": "Rigid node hierarchy (unskinned node transforms)",
+  "texture": "Unified palette colormap",
+  "animations": [
+    {
+      "name": "idle",
+      "duration_sec": 1,
+      "loop": true,
+      "trigger": "Default resting state"
+    },
+    {
+      "name": "walk",
+      "duration_sec": 0.8,
+      "loop": true,
+      "trigger": "Moving across screen / wandering"
+    },
+    {
+      "name": "run",
+      "duration_sec": 0.6,
+      "loop": true,
+      "trigger": "Dragging / fast transit"
+    },
+    {
+      "name": "eat",
+      "duration_sec": 1.2,
+      "loop": false,
+      "semantic_alias": "think",
+      "trigger": "AI processing / thinking"
+    },
+    {
+      "name": "dance",
+      "duration_sec": 1.5,
+      "loop": true,
+      "semantic_alias": "cheer",
+      "trigger": "Success, streak, correct answer"
+    },
+    {
+      "name": "gesture-positive",
+      "duration_sec": 1,
+      "loop": false,
+      "semantic_alias": "talk",
+      "trigger": "Speaking / tutor feedback"
+    },
+    {
+      "name": "gesture-negative",
+      "duration_sec": 1,
+      "loop": false,
+      "semantic_alias": "oops",
+      "trigger": "Pronunciation miss / error"
+    },
+    {
+      "name": "static",
+      "duration_sec": 0,
+      "loop": false,
+      "trigger": "T-pose / neutral binding pose"
+    }
+  ]
+}
