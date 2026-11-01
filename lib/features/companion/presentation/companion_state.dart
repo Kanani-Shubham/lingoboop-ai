@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/character_data.dart';
 import '../../../core/constants/language_data.dart';
+import '../../../core/services/overlay_service.dart';
 import '../../../core/services/user_data_service.dart';
 import '../../../core/widgets/karaoke_lyrics_view.dart';
 
@@ -86,6 +87,12 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     final pet = CharacterRegistry.getByKey(petKey);
     state = state.copyWith(activePet: pet);
     UserDataService.instance.savePreferences(activeCharacterId: petKey);
+    final colorHex = '#${pet.accentColor.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+    OverlayService.instance.updatePet(
+      petKey: pet.key,
+      petName: pet.name,
+      petColorHex: colorHex,
+    );
   }
 
   void setSourceLanguage(String code) {
@@ -98,6 +105,10 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
       nativeCode: code,
       targetCode: state.targetLanguage.code,
     );
+    OverlayService.instance.updateLanguages(
+      sourceLang: lang.bcp47,
+      targetLang: state.targetLanguage.bcp47,
+    );
   }
 
   void setTargetLanguage(String code) {
@@ -106,6 +117,10 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     UserDataService.instance.saveUserLanguage(
       nativeCode: state.sourceLanguage.code,
       targetCode: code,
+    );
+    OverlayService.instance.updateLanguages(
+      sourceLang: state.sourceLanguage.bcp47,
+      targetLang: lang.bcp47,
     );
   }
 

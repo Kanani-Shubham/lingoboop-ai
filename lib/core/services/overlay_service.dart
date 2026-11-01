@@ -1,0 +1,114 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+
+class OverlayService {
+  OverlayService._();
+  static final OverlayService instance = OverlayService._();
+
+  static const MethodChannel _channel = MethodChannel('com.lingoboop.app/overlay');
+
+  /// Check whether Android "Display Over Other Apps" permission is granted
+  Future<bool> checkPermission() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      final res = await _channel.invokeMethod<bool>('checkPermission');
+      return res ?? false;
+    } catch (e) {
+      debugPrint('Error checking overlay permission: $e');
+      return false;
+    }
+  }
+
+  /// Launch Android Settings page to allow user to grant overlay permission
+  Future<void> requestPermission() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod('requestPermission');
+    } catch (e) {
+      debugPrint('Error requesting overlay permission: $e');
+    }
+  }
+
+  /// Start persistent native floating pet Foreground Service
+  Future<bool> startOverlay({
+    required String petKey,
+    required String petName,
+    required String petColorHex,
+    required String sourceLang,
+    required String targetLang,
+  }) async {
+    if (!Platform.isAndroid) return false;
+    try {
+      final res = await _channel.invokeMethod<bool>('startOverlay', {
+        'petKey': petKey,
+        'petName': petName,
+        'petColor': petColorHex,
+        'sourceLang': sourceLang,
+        'targetLang': targetLang,
+      });
+      return res ?? false;
+    } catch (e) {
+      debugPrint('Error starting native overlay: $e');
+      return false;
+    }
+  }
+
+  /// Stop persistent native floating pet Foreground Service
+  Future<bool> stopOverlay() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      final res = await _channel.invokeMethod<bool>('stopOverlay');
+      return res ?? false;
+    } catch (e) {
+      debugPrint('Error stopping native overlay: $e');
+      return false;
+    }
+  }
+
+  /// Check whether native floating pet service is currently running
+  Future<bool> isOverlayRunning() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      final res = await _channel.invokeMethod<bool>('isOverlayRunning');
+      return res ?? false;
+    } catch (e) {
+      debugPrint('Error checking overlay running status: $e');
+      return false;
+    }
+  }
+
+  /// Update active pet in running native overlay
+  Future<void> updatePet({
+    required String petKey,
+    required String petName,
+    required String petColorHex,
+  }) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod('updatePet', {
+        'petKey': petKey,
+        'petName': petName,
+        'petColor': petColorHex,
+      });
+    } catch (e) {
+      debugPrint('Error updating pet in overlay: $e');
+    }
+  }
+
+  /// Update languages in running native overlay
+  Future<void> updateLanguages({
+    required String sourceLang,
+    required String targetLang,
+  }) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod('updateLanguages', {
+        'sourceLang': sourceLang,
+        'targetLang': targetLang,
+      });
+    } catch (e) {
+      debugPrint('Error updating languages in overlay: $e');
+    }
+  }
+}
