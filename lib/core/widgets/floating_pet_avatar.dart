@@ -1,5 +1,7 @@
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import '../constants/app_colors.dart';
 import '../constants/character_data.dart';
 
@@ -10,6 +12,7 @@ class FloatingPetAvatar extends StatefulWidget {
   final ValueChanged<Offset> onDragUpdate;
   final VoidCallback onDragEnd;
   final bool showHint;
+  final double size;
 
   const FloatingPetAvatar({
     super.key,
@@ -19,6 +22,7 @@ class FloatingPetAvatar extends StatefulWidget {
     required this.onDragUpdate,
     required this.onDragEnd,
     this.showHint = true,
+    this.size = 150.0,
   });
 
   @override
@@ -28,6 +32,8 @@ class FloatingPetAvatar extends StatefulWidget {
 class _FloatingPetAvatarState extends State<FloatingPetAvatar>
     with SingleTickerProviderStateMixin {
   late AnimationController _idleController;
+  WebViewController? _webController;
+  bool _isWebViewReady = false;
 
   @override
   void initState() {
@@ -36,6 +42,57 @@ class _FloatingPetAvatarState extends State<FloatingPetAvatar>
       vsync: this,
       duration: const Duration(milliseconds: 1800),
     )..repeat(reverse: true);
+
+    _initWeb3DViewer();
+  }
+
+  void _initWeb3DViewer() {
+    if (WebViewPlatform.instance == null) {
+      return; // Headless unit tests or environments without native webview platform
+    }
+    try {
+      final controller = WebViewController()
+        ..setJavaScriptMode(JavaScriptMode.unrestricted)
+        ..setBackgroundColor(Colors.transparent)
+        ..setNavigationDelegate(
+          NavigationDelegate(
+            onPageFinished: (url) {
+              if (mounted) {
+                setState(() => _isWebViewReady = true);
+                _updatePetInViewer(widget.character.key);
+                _updateModeInViewer(widget.mode);
+              }
+            },
+          ),
+        )
+        ..loadFlutterAsset('assets/web/pet_viewer.html');
+      _webController = controller;
+    } catch (e) {
+      debugPrint('WebView 3D viewer notice: $e');
+    }
+  }
+
+  void _updatePetInViewer(String petKey) {
+    if (_isWebViewReady && _webController != null) {
+      _webController?.runJavaScript("if (window.setPet) window.setPet('$petKey');");
+    }
+  }
+
+  void _updateModeInViewer(String mode) {
+    if (_isWebViewReady && _webController != null) {
+      _webController?.runJavaScript("if (window.setMode) window.setMode('$mode');");
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant FloatingPetAvatar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.character.key != widget.character.key) {
+      _updatePetInViewer(widget.character.key);
+    }
+    if (oldWidget.mode != widget.mode) {
+      _updateModeInViewer(widget.mode);
+    }
   }
 
   @override
@@ -48,12 +105,8 @@ class _FloatingPetAvatarState extends State<FloatingPetAvatar>
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: widget.onTap,
-      onPanUpdate: (details) {
-        widget.onDragUpdate(details.delta);
-      },
-      onPanEnd: (_) {
-        widget.onDragEnd();
-      },
+      onPanUpdate: (details) => widget.onDragUpdate(details.delta),
+      onPanEnd: (_) => widget.onDragEnd(),
       child: AnimatedBuilder(
         animation: _idleController,
         builder: (context, child) {
@@ -84,21 +137,28 @@ class _FloatingPetAvatarState extends State<FloatingPetAvatar>
                   child: Transform.scale(
                     scaleY: scaleY,
                     child: Container(
-                      width: 140,
-                      height: 140,
+                      width: widget.size,
+                      height: widget.size,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: widget.character.accentColor.withValues(alpha: 0.18),
-                            blurRadius: 24,
+                            color: widget.character.accentColor.withValues(alpha: 0.22),
+                            blurRadius: 28,
                             offset: const Offset(0, 10),
                           ),
                         ],
                       ),
-                      child: Image.asset(
-                        widget.character.previewAsset,
-                        fit: BoxFit.contain,
+                      child: ClipOval(
+                        child: _webController != null && !kIsWeb
+                            ? IgnorePointer(
+                                child: WebViewWidget(controller: _webController!),
+                              )
+                            : Image.asset(
+                                widget.character.previewAsset,
+                                fit: BoxFit.contain,
+                                filterQuality: FilterQuality.high,
+                              ),
                       ),
                     ),
                   ),

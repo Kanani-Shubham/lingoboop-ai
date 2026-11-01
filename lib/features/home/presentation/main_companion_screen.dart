@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/services/auth_service.dart';
+import '../../../core/services/user_data_service.dart';
 import '../../../core/widgets/floating_pet_avatar.dart';
-import '../../../core/widgets/polypet_bottom_nav.dart';
-import '../../../core/widgets/polypet_card.dart';
 import '../../companion/presentation/companion_state.dart';
 import '../../companion/presentation/lingo_card_widget.dart';
 import '../../settings/presentation/pet_settings_sheet.dart';
@@ -16,9 +16,39 @@ class MainCompanionScreen extends ConsumerStatefulWidget {
 }
 
 class _MainCompanionScreenState extends ConsumerState<MainCompanionScreen> {
-  int _currentTabIndex = 0;
-  Offset _petPos = const Offset(120, 360);
+  Offset _petPos = const Offset(110, 260);
   bool _hasTappedPet = false;
+  String _displayName = 'Learner';
+  double _todayMinutes = 0.0;
+  int _dailyGoalMinutes = 10;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRealUserData();
+  }
+
+  Future<void> _loadRealUserData() async {
+    try {
+      final profile = await UserDataService.instance.getProfile();
+      final prefs = await UserDataService.instance.getPreferences();
+      final seconds = await UserDataService.instance.getTotalSpeechSeconds();
+
+      if (mounted) {
+        setState(() {
+          if (profile != null && profile['full_name'] != null && profile['full_name'].toString().isNotEmpty) {
+            _displayName = profile['full_name'].toString().split(' ')[0];
+          } else if (AuthService.instance.currentUser?.email != null) {
+            _displayName = AuthService.instance.currentUser!.email!.split('@')[0];
+          }
+          if (prefs != null && prefs['daily_goal_minutes'] != null) {
+            _dailyGoalMinutes = prefs['daily_goal_minutes'] as int;
+          }
+          _todayMinutes = (seconds / 60.0);
+        });
+      }
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -26,73 +56,83 @@ class _MainCompanionScreenState extends ConsumerState<MainCompanionScreen> {
     final notifier = ref.read(companionProvider.notifier);
     final size = MediaQuery.of(context).size;
 
-    // Floor baseline clamp matching prototype
-    final maxY = size.height - 64 - 150;
+    // Boundary clamp: stay cleanly above bottom nav (64px) and card clearance
+    final maxY = size.height - 180;
+
+    final langPairTitle =
+        '${companionState.sourceLanguage.flag} ${companionState.sourceLanguage.name.split(' ')[0]} → ${companionState.targetLanguage.flag} ${companionState.targetLanguage.name}';
 
     return Scaffold(
       backgroundColor: AppColors.phoneBackground,
       body: SafeArea(
-        bottom: false,
         child: Stack(
           children: [
-            // 1. Primary Page Content (Notes Feed & Header)
+            // 1. Stage Hub Content
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Status Bar Simulation
+                // Top App Header
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        '9:41',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textDark,
-                            ),
-                      ),
-                      Text(
-                        '5G 82%',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textDark,
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Action Header: "Notes" Title and Gear Button
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Notes',
-                        style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                              fontSize: 30,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textDark,
-                            ),
-                      ),
-                      // Gear Button (#gear)
+                      // Language Pair Pill
                       InkWell(
                         onTap: notifier.toggleSettings,
                         borderRadius: BorderRadius.circular(999),
                         child: Container(
-                          width: 42,
-                          height: 42,
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                           decoration: BoxDecoration(
                             color: Colors.white,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: AppColors.border, width: 2.0),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: AppColors.border, width: 1.5),
+                            boxShadow: const [
+                              BoxShadow(color: Color(0x0A000000), blurRadius: 8, offset: Offset(0, 2)),
+                            ],
                           ),
-                          child: const Center(
-                            child: Icon(Icons.settings, size: 20, color: AppColors.textDark),
+                          child: Row(
+                            children: [
+                              Text(
+                                langPairTitle,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textDark,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              const Icon(Icons.arrow_drop_down, size: 18, color: AppColors.textMuted),
+                            ],
                           ),
                         ),
+                      ),
+
+                      // Action Buttons: History & Settings
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.history, color: AppColors.textDark, size: 22),
+                            tooltip: 'Conversation History',
+                            onPressed: () => Navigator.pushNamed(context, '/history'),
+                          ),
+                          InkWell(
+                            onTap: notifier.toggleSettings,
+                            borderRadius: BorderRadius.circular(999),
+                            child: Container(
+                              width: 38,
+                              height: 38,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: AppColors.border, width: 1.5),
+                              ),
+                              child: const Center(
+                                child: Icon(Icons.tune, size: 18, color: AppColors.textDark),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -100,46 +140,129 @@ class _MainCompanionScreenState extends ConsumerState<MainCompanionScreen> {
 
                 const SizedBox(height: 8),
 
-                // Note Cards List (.n)
+                // Greeting & Status Card
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Hi, $_displayName',
+                        style: Theme.of(context).textTheme.displayLarge?.copyWith(
+                              fontSize: 26,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textDark,
+                            ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        companionState.statusNote,
+                        style: const TextStyle(fontSize: 14, color: AppColors.textMuted),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 14),
+
+                // Practice Prompts Feed
                 Expanded(
                   child: ListView(
-                    padding: const EdgeInsets.only(bottom: 120),
+                    padding: const EdgeInsets.only(left: 20, right: 20, bottom: 90),
                     children: [
-                      PolyPetCard(
-                        title: 'Groceries',
-                        subtitle: 'Rice, ghee, mangoes, two lemons',
-                        isOdd: false,
-                        onTap: () {
-                          notifier.openCard();
-                          notifier.submitTypedText('Buy rice, ghee, mangoes, and two lemons.');
-                        },
+                      // Daily Practice Goal Card
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: AppColors.borderSoft, width: 1.0),
+                          boxShadow: const [
+                            BoxShadow(color: Color(0x08000000), blurRadius: 10, offset: Offset(0, 3)),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  'Daily Speech Practice',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.textDark,
+                                  ),
+                                ),
+                                Text(
+                                  '${_todayMinutes.toStringAsFixed(1)} / $_dailyGoalMinutes min',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: companionState.activePet.accentColor,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(999),
+                              child: LinearProgressIndicator(
+                                value: _dailyGoalMinutes > 0
+                                    ? (_todayMinutes / _dailyGoalMinutes).clamp(0.0, 1.0)
+                                    : 0.0,
+                                minHeight: 8,
+                                backgroundColor: AppColors.border,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  companionState.activePet.accentColor,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      PolyPetCard(
-                        title: 'Train to Surat',
-                        subtitle: 'Saturday, 7:40 am, platform 3',
-                        isOdd: true,
-                        onTap: () {
-                          notifier.openCard();
-                          notifier.submitTypedText('The train to Surat leaves at platform three.');
-                        },
+
+                      const SizedBox(height: 16),
+
+                      Text(
+                        'PRACTICE PROMPTS',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 1.0,
+                              color: AppColors.textMuted,
+                            ),
                       ),
-                      PolyPetCard(
-                        title: 'Call Dad',
-                        subtitle: 'About Sunday lunch',
-                        isOdd: false,
-                        onTap: () {
-                          notifier.openCard();
-                          notifier.submitTypedText('Call Dad about Sunday lunch.');
-                        },
+                      const SizedBox(height: 8),
+
+                      _buildPromptCard(
+                        title: 'Ask for Directions',
+                        subtitle: 'How do I reach the nearest railway station?',
+                        sourceSample: 'નજીકનું રેલવે સ્ટેશન ક્યાં છે?',
+                        targetTranslation: 'Where is the nearest railway station?',
+                        notifier: notifier,
                       ),
-                      PolyPetCard(
-                        title: 'Practice',
-                        subtitle: 'Say it out loud, even if it sounds wrong',
-                        isOdd: true,
-                        onTap: () {
-                          notifier.openCard();
-                          notifier.startListening();
-                        },
+                      _buildPromptCard(
+                        title: 'Order Refreshments',
+                        subtitle: 'Please give me two cups of hot masala tea.',
+                        sourceSample: 'કૃપા કરીને મને બે કપ ગરમ મસાલા ચા આપો.',
+                        targetTranslation: 'Please give me two cups of hot masala tea.',
+                        notifier: notifier,
+                      ),
+                      _buildPromptCard(
+                        title: 'Introduce Yourself',
+                        subtitle: 'My name is, and I am learning English.',
+                        sourceSample: 'મારું નામ છે, અને હું અંગ્રેજી શીખી રહ્યો છું.',
+                        targetTranslation: 'My name is, and I am learning English.',
+                        notifier: notifier,
+                      ),
+                      _buildPromptCard(
+                        title: 'Free Speech Practice',
+                        subtitle: 'Say anything out loud and hear it spoken back.',
+                        sourceSample: '',
+                        targetTranslation: '',
+                        isFreeForm: true,
+                        notifier: notifier,
                       ),
                     ],
                   ),
@@ -150,19 +273,17 @@ class _MainCompanionScreenState extends ConsumerState<MainCompanionScreen> {
             // 2. Settings Sheet Dropdown (#sh)
             if (companionState.isSettingsOpen)
               Positioned(
-                top: 70,
-                left: 0,
-                right: 0,
+                top: 60,
+                left: 12,
+                right: 12,
                 child: const PetSettingsSheet(),
               ),
 
             // 3. Floating LingoCard Dialogue (#cd)
             if (companionState.isCardOpen) ...[
-              // Docking placement logic from HTML prototype:
-              // If pet is on left, card docks right; if on right, card docks left.
               Positioned(
-                bottom: 84,
-                left: _petPos.dx + 70 < size.width / 2 ? 120 : 16,
+                bottom: 16,
+                left: _petPos.dx + 70 < size.width / 2 ? 110 : 16,
                 right: _petPos.dx + 70 < size.width / 2 ? 16 : null,
                 child: const LingoCardWidget(),
               ),
@@ -183,7 +304,7 @@ class _MainCompanionScreenState extends ConsumerState<MainCompanionScreen> {
                 onDragUpdate: (delta) {
                   setState(() {
                     _petPos = Offset(
-                      (_petPos.dx + delta.dx).clamp(-20.0, size.width - 120.0),
+                      (_petPos.dx + delta.dx).clamp(-10.0, size.width - 130.0),
                       (_petPos.dy + delta.dy).clamp(60.0, maxY),
                     );
                   });
@@ -194,28 +315,53 @@ class _MainCompanionScreenState extends ConsumerState<MainCompanionScreen> {
                 },
               ),
             ),
-
-            // 5. Bottom Navigation Bar (.tb)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: PolyPetBottomNav(
-                currentIndex: _currentTabIndex,
-                activeAccentColor: companionState.activePet.accentColor,
-                onTabSelected: (index) {
-                  setState(() => _currentTabIndex = index);
-                  if (index == 1) {
-                    Navigator.pushNamed(context, '/progress');
-                  } else if (index == 2) {
-                    Navigator.pushNamed(context, '/achievements');
-                  } else if (index == 3) {
-                    Navigator.pushNamed(context, '/profile');
-                  }
-                },
-              ),
-            ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPromptCard({
+    required String title,
+    required String subtitle,
+    required String sourceSample,
+    required String targetTranslation,
+    bool isFreeForm = false,
+    required CompanionNotifier notifier,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.borderSoft, width: 1.0),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          title: Text(
+            title,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textDark,
+            ),
+          ),
+          subtitle: Text(
+            subtitle,
+            style: const TextStyle(fontSize: 13, color: AppColors.textMuted),
+          ),
+          trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: AppColors.textMuted),
+          onTap: () {
+            notifier.openCard();
+            if (isFreeForm) {
+              notifier.startListening();
+            } else {
+              notifier.submitTypedText(targetTranslation);
+            }
+          },
         ),
       ),
     );

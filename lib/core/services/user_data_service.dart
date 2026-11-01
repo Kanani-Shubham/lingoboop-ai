@@ -1,0 +1,295 @@
+import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../config/app_config.dart';
+
+class UserDataService {
+  UserDataService._();
+  static final UserDataService instance = UserDataService._();
+
+  SupabaseClient? get _client {
+    if (!AppConfig.isSupabaseConfigured) return null;
+    try {
+      return Supabase.instance.client;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String? get currentUserId => _client?.auth.currentUser?.id;
+
+  /// Fetch user profile from public.profiles
+  Future<Map<String, dynamic>?> getProfile() async {
+    final uid = currentUserId;
+    final client = _client;
+    if (client == null || uid == null) return null;
+
+    try {
+      final data = await client
+          .from('profiles')
+          .select()
+          .eq('id', uid)
+          .maybeSingle();
+      return data;
+    } catch (e) {
+      debugPrint('Error fetching profile: $e');
+      return null;
+    }
+  }
+
+  /// Update user profile
+  Future<bool> updateProfile({String? fullName, String? avatarUrl}) async {
+    final uid = currentUserId;
+    final client = _client;
+    if (client == null || uid == null) return false;
+
+    try {
+      final updates = <String, dynamic>{
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+      if (fullName != null) updates['full_name'] = fullName;
+      if (avatarUrl != null) updates['avatar_url'] = avatarUrl;
+
+      await client.from('profiles').update(updates).eq('id', uid);
+      return true;
+    } catch (e) {
+      debugPrint('Error updating profile: $e');
+      return false;
+    }
+  }
+
+  /// Fetch user preferences
+  Future<Map<String, dynamic>?> getPreferences() async {
+    final uid = currentUserId;
+    final client = _client;
+    if (client == null || uid == null) return null;
+
+    try {
+      final data = await client
+          .from('user_preferences')
+          .select()
+          .eq('user_id', uid)
+          .maybeSingle();
+      return data;
+    } catch (e) {
+      debugPrint('Error fetching preferences: $e');
+      return null;
+    }
+  }
+
+  /// Upsert user preferences
+  Future<bool> savePreferences({
+    String? activeCharacterId,
+    double? audioSpeed,
+    int? dailyGoalMinutes,
+  }) async {
+    final uid = currentUserId;
+    final client = _client;
+    if (client == null || uid == null) return false;
+
+    try {
+      final payload = <String, dynamic>{
+        'user_id': uid,
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+      if (activeCharacterId != null) payload['active_character_id'] = activeCharacterId;
+      if (audioSpeed != null) payload['audio_speed'] = audioSpeed;
+      if (dailyGoalMinutes != null) payload['daily_goal_minutes'] = dailyGoalMinutes;
+
+      await client.from('user_preferences').upsert(payload);
+      return true;
+    } catch (e) {
+      debugPrint('Error saving preferences: $e');
+      return false;
+    }
+  }
+
+  /// Fetch user language pairs
+  Future<List<Map<String, dynamic>>> getUserLanguages() async {
+    final uid = currentUserId;
+    final client = _client;
+    if (client == null || uid == null) return [];
+
+    try {
+      final response = await client
+          .from('user_languages')
+          .select()
+          .eq('user_id', uid)
+          .order('is_active', ascending: false);
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      debugPrint('Error fetching user languages: $e');
+      return [];
+    }
+  }
+
+  /// Save language pair
+  Future<bool> saveUserLanguage({
+    required String nativeCode,
+    required String targetCode,
+    String proficiencyLevel = 'beginner',
+  }) async {
+    final uid = currentUserId;
+    final client = _client;
+    if (client == null || uid == null) return false;
+
+    try {
+      await client.from('user_languages').upsert({
+        'user_id': uid,
+        'native_language_code': nativeCode,
+        'target_language_code': targetCode,
+        'proficiency_level': proficiencyLevel,
+        'is_active': true,
+        'updated_at': DateTime.now().toIso8601String(),
+      }, onConflict: 'user_id, native_language_code, target_language_code');
+      return true;
+    } catch (e) {
+      debugPrint('Error saving user language: $e');
+      return false;
+    }
+  }
+
+  /// Fetch conversation history
+  Future<List<Map<String, dynamic>>> getConversations() async {
+    final uid = currentUserId;
+    final client = _client;
+    if (client == null || uid == null) return [];
+
+    try {
+      final response = await client
+          .from('conversations')
+          .select('*, messages(*)')
+          .eq('user_id', uid)
+          .order('updated_at', ascending: false)
+          .limit(50);
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      debugPrint('Error fetching conversations: $e');
+      return [];
+    }
+  }
+
+  /// Save a new conversation session with speech message
+  Future<String?> recordConversationMessage({
+    required String characterId,
+    required String sourceLanguage,
+    required String targetLanguage,
+    required String sourceText,
+    required String translatedText,
+    double? pronunciationScore,
+  }) async {
+    final uid = currentUserId;
+    final client = _client;
+    if (client == null || uid == null) return null;
+
+    try {
+      // 1. Create conversation record
+      final conv = await client
+          .from('conversations')
+          .insert({
+            'user_id': uid,
+            'character_id': characterId,
+            'title': sourceText.length > 28 ? '${sourceText.substring(0, 28)}...' : sourceText,
+            'source_language': sourceLanguage,
+            'target_language': targetLanguage,
+          })
+          .select('id')
+          .single();
+
+      final convId = conv['id'] as String;
+
+      // 2. Insert message record (composite key ensures user_id matches conversation.user_id)
+      await client.from('messages').insert({
+        'conversation_id': convId,
+        'user_id': uid,
+        'sender_role': 'user',
+        'source_text': sourceText,
+        'translated_text': translatedText,
+        'pronunciation_score': pronunciationScore,
+      });
+
+      return convId;
+    } catch (e) {
+      debugPrint('Error recording conversation: $e');
+      return null;
+    }
+  }
+
+  /// Fetch learning progress (spaced repetition)
+  Future<List<Map<String, dynamic>>> getLearningProgress() async {
+    final uid = currentUserId;
+    final client = _client;
+    if (client == null || uid == null) return [];
+
+    try {
+      final response = await client
+          .from('learning_progress')
+          .select()
+          .eq('user_id', uid)
+          .order('next_review_at', ascending: true);
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      debugPrint('Error fetching learning progress: $e');
+      return [];
+    }
+  }
+
+  /// Fetch user achievements
+  Future<List<Map<String, dynamic>>> getAchievements() async {
+    final uid = currentUserId;
+    final client = _client;
+    if (client == null || uid == null) return [];
+
+    try {
+      final response = await client
+          .from('achievements')
+          .select()
+          .eq('user_id', uid)
+          .order('earned_at', ascending: false);
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      debugPrint('Error fetching achievements: $e');
+      return [];
+    }
+  }
+
+  /// Fetch user subscription entitlement
+  Future<Map<String, dynamic>?> getSubscription() async {
+    final uid = currentUserId;
+    final client = _client;
+    if (client == null || uid == null) return null;
+
+    try {
+      final response = await client
+          .from('subscriptions')
+          .select()
+          .eq('user_id', uid)
+          .maybeSingle();
+      return response;
+    } catch (e) {
+      debugPrint('Error fetching subscription: $e');
+      return null;
+    }
+  }
+
+  /// Fetch usage records summary (seconds consumed)
+  Future<double> getTotalSpeechSeconds() async {
+    final uid = currentUserId;
+    final client = _client;
+    if (client == null || uid == null) return 0.0;
+
+    try {
+      final response = await client
+          .from('usage_records')
+          .select('duration_seconds')
+          .eq('user_id', uid);
+      double total = 0.0;
+      for (final r in response) {
+        total += (r['duration_seconds'] as num?)?.toDouble() ?? 0.0;
+      }
+      return total;
+    } catch (e) {
+      debugPrint('Error fetching speech usage: $e');
+      return 0.0;
+    }
+  }
+}

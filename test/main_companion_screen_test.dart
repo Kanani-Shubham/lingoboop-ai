@@ -4,9 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lingoboop/features/home/presentation/main_companion_screen.dart';
 
 void main() {
-  testWidgets('MainCompanionScreen renders notes feed, floating pet and gear button',
+  testWidgets('MainCompanionScreen renders speech companion stage, prompts and settings sheet',
       (WidgetTester tester) async {
-    // Increase test surface size to simulate standard phone aspect ratio
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 2.0;
 
@@ -19,18 +18,21 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 300));
 
-    // Verify Action Header and Notes
-    expect(find.text('Notes'), findsOneWidget);
-    expect(find.text('Groceries'), findsOneWidget);
-    expect(find.text('Train to Surat'), findsOneWidget);
-    expect(find.text('Call Dad'), findsOneWidget);
-    expect(find.text('Practice'), findsOneWidget);
+    // Verify Language Pair Pill
+    expect(find.textContaining('Gujarati'), findsWidgets);
 
-    // Verify Gear Settings button exists
-    expect(find.byIcon(Icons.settings), findsOneWidget);
+    // Verify Practice Prompts
+    expect(find.text('Ask for Directions'), findsOneWidget);
+    expect(find.text('Order Refreshments'), findsOneWidget);
+    expect(find.text('Introduce Yourself'), findsOneWidget);
+    expect(find.text('Free Speech Practice'), findsOneWidget);
 
-    // Tap gear button to open settings sheet
-    await tester.tap(find.byIcon(Icons.settings));
+    // Verify History icon and Tune button exist
+    expect(find.byIcon(Icons.history), findsOneWidget);
+    expect(find.byIcon(Icons.tune), findsOneWidget);
+
+    // Tap tune button to open settings sheet
+    await tester.tap(find.byIcon(Icons.tune));
     await tester.pump(const Duration(milliseconds: 300));
 
     // Settings sheet should be visible
@@ -44,7 +46,6 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Pet and languages'), findsNothing);
 
-    // Reset surface size after test
     addTearDown(tester.view.resetPhysicalSize);
   });
 }

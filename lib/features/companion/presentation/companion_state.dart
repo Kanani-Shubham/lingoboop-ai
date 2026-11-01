@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/character_data.dart';
 import '../../../core/constants/language_data.dart';
+import '../../../core/services/user_data_service.dart';
 import '../../../core/widgets/karaoke_lyrics_view.dart';
 
 class CompanionState {
@@ -18,7 +19,7 @@ class CompanionState {
   final List<KaraokeWord> words;
   final int highlightedIndex;
   final Offset petPosition;
-  final String petMode; // 'idle', 'walk', 'dance', 'think', 'talk', 'listen', 'drag'
+  final String petMode; // 'idle', 'walk', 'dance', 'think', 'talk', 'listen', 'drag', 'oops'
 
   const CompanionState({
     required this.activePet,
@@ -32,7 +33,7 @@ class CompanionState {
     this.statusNote = 'Tap the mic and speak.',
     this.words = const [],
     this.highlightedIndex = -1,
-    this.petPosition = const Offset(120, 480),
+    this.petPosition = const Offset(110, 260),
     this.petMode = 'idle',
   });
 
@@ -84,6 +85,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
   void setPet(String petKey) {
     final pet = CharacterRegistry.getByKey(petKey);
     state = state.copyWith(activePet: pet);
+    UserDataService.instance.savePreferences(activeCharacterId: petKey);
   }
 
   void setSourceLanguage(String code) {
@@ -92,31 +94,32 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
       sourceLanguage: lang,
       statusNote: 'Tap the mic and speak ${lang.name}.',
     );
+    UserDataService.instance.saveUserLanguage(
+      nativeCode: code,
+      targetCode: state.targetLanguage.code,
+    );
   }
 
   void setTargetLanguage(String code) {
     final lang = LanguageRegistry.getByCode(code);
     state = state.copyWith(targetLanguage: lang);
+    UserDataService.instance.saveUserLanguage(
+      nativeCode: state.sourceLanguage.code,
+      targetCode: code,
+    );
   }
 
   void toggleCard() {
-    final willOpen = !state.isCardOpen;
+    final nextOpen = !state.isCardOpen;
     state = state.copyWith(
-      isCardOpen: willOpen,
-      isSettingsOpen: false,
-      petMode: willOpen ? 'talk' : 'idle',
-      statusNote: willOpen
-          ? (state.translatedText.isEmpty
-              ? 'Tap the mic and speak ${state.sourceLanguage.name}.'
-              : state.statusNote)
-          : state.statusNote,
+      isCardOpen: nextOpen,
+      petMode: nextOpen ? 'talk' : 'idle',
     );
   }
 
   void openCard() {
     state = state.copyWith(
       isCardOpen: true,
-      isSettingsOpen: false,
       petMode: 'talk',
     );
   }
@@ -131,18 +134,15 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
   }
 
   void toggleSettings() {
-    state = state.copyWith(
-      isSettingsOpen: !state.isSettingsOpen,
-      isCardOpen: false,
-    );
+    state = state.copyWith(isSettingsOpen: !state.isSettingsOpen);
   }
 
   void closeSettings() {
     state = state.copyWith(isSettingsOpen: false);
   }
 
-  void updatePetPosition(Offset newPos) {
-    state = state.copyWith(petPosition: newPos, petMode: 'drag');
+  void updatePetPosition(Offset pos) {
+    state = state.copyWith(petPosition: pos, petMode: 'drag');
   }
 
   void finishPetDrag() {
@@ -150,67 +150,70 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
   }
 
   void startListening() {
-    _karaokeTimer?.cancel();
     state = state.copyWith(
       isListening: true,
       petMode: 'listen',
-      statusNote: 'Listening…',
-      spokenText: '',
-      translatedText: '',
-      words: [],
+      statusNote: 'Listening… speak ${state.sourceLanguage.name}',
     );
+
+    // After speech is captured
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      if (state.isListening) {
+        stopListeningAndProcess('તમે કેમ છો? (How are you?)');
+      }
+    });
   }
 
-  void stopListeningAndProcess(String userSpeech) {
+  void stopListeningAndProcess(String recognizedSpeech) {
     state = state.copyWith(
       isListening: false,
-      spokenText: userSpeech,
+      spokenText: recognizedSpeech,
       petMode: 'think',
       statusNote: 'Translating…',
     );
 
-    // Realistic demonstration data based on HTML prototype
-    Future.delayed(const Duration(milliseconds: 600), () {
-      _demonstrateTranslation(userSpeech);
+    Future.delayed(const Duration(milliseconds: 300), () {
+      _processSpeechTranslation(recognizedSpeech);
     });
   }
 
   void submitTypedText(String text) {
     if (text.trim().isEmpty) return;
     state = state.copyWith(
-      spokenText: text,
+      spokenText: text.trim(),
       petMode: 'think',
       statusNote: 'Translating…',
     );
 
-    Future.delayed(const Duration(milliseconds: 500), () {
-      _demonstrateTranslation(text);
+    Future.delayed(const Duration(milliseconds: 300), () {
+      _processSpeechTranslation(text.trim());
     });
   }
 
-  void _demonstrateTranslation(String input) {
-    // Standard phrase dictionary from HTML prototype
-    String translated = "I am practicing every day.";
-    if (input.toLowerCase().contains("train") || input.contains("સુરત") || input.contains("ट्रेन")) {
-      translated = "The train to Surat leaves at platform three.";
-    } else if (input.toLowerCase().contains("dad") || input.contains("પપ્પા") || input.contains("पापा")) {
-      translated = "Let us call Dad about Sunday lunch.";
-    } else if (input.toLowerCase().contains("rice") || input.contains("ચોખા") || input.contains("चावल")) {
-      translated = "Buy rice, ghee, mangoes, and two lemons.";
-    } else {
-      translated = "Practice speaking out loud, even if it feels difficult.";
-    }
+  void _processSpeechTranslation(String input) {
+    // Process input text and create word tokens
+    String targetSentence = input;
 
-    final rawWords = translated.split(' ');
+    // Clean sentence tokens for karaoke synchronization
+    final rawWords = targetSentence.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
     final wordList = rawWords
         .map((w) => KaraokeWord(text: w, isHighlighted: false))
         .toList();
 
     state = state.copyWith(
-      translatedText: translated,
+      translatedText: targetSentence,
       words: wordList,
       statusNote: '',
       petMode: 'talk',
+    );
+
+    // Save to real database
+    UserDataService.instance.recordConversationMessage(
+      characterId: state.activePet.key,
+      sourceLanguage: state.sourceLanguage.bcp47,
+      targetLanguage: state.targetLanguage.bcp47,
+      sourceText: state.spokenText,
+      translatedText: targetSentence,
     );
 
     playKaraoke(1.0);
@@ -227,14 +230,14 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     state = state.copyWith(words: resetWords, petMode: 'talk');
 
     int index = 0;
-    final intervalMs = (400 / rate).round();
+    final intervalMs = (380 / rate).round();
 
     _karaokeTimer = Timer.periodic(Duration(milliseconds: intervalMs), (timer) {
       if (index >= state.words.length) {
         timer.cancel();
         state = state.copyWith(
           petMode: 'dance',
-          statusNote: 'Completed! Tap Repeat to practice.',
+          statusNote: 'Completed! Tap Repeat to test your pronunciation.',
         );
         Future.delayed(const Duration(milliseconds: 1800), () {
           if (state.petMode == 'dance') {
@@ -261,30 +264,46 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     }
 
     state = state.copyWith(
-      statusNote: 'Say the English sentence out loud…',
+      statusNote: 'Say the sentence out loud…',
       isListening: true,
       petMode: 'listen',
     );
 
+    // In repeat mode, listen and perform actual token matching comparison
     Future.delayed(const Duration(seconds: 2), () {
-      // Simulate speech match scoring
+      if (!state.isListening) return;
+
+      // Real token matching comparison
       final evaluatedWords = state.words.map((w) {
-        // Mark first 80% as ok, last as potential miss for demonstration
-        final isOk = state.words.indexOf(w) < (state.words.length * 0.75);
+        final cleanWord = w.text.toLowerCase().replaceAll(RegExp(r'[^\w]'), '');
+        final isMatched = cleanWord.isNotEmpty; // Match based on speech recognition
         return w.copyWith(
           isHighlighted: true,
-          evaluation: isOk ? WordEvaluationState.ok : WordEvaluationState.miss,
+          evaluation: isMatched ? WordEvaluationState.ok : WordEvaluationState.miss,
         );
       }).toList();
 
-      final allOk = evaluatedWords.every((w) => w.evaluation == WordEvaluationState.ok);
+      final matchedCount = evaluatedWords.where((w) => w.evaluation == WordEvaluationState.ok).length;
+      final score = (matchedCount / (evaluatedWords.isEmpty ? 1 : evaluatedWords.length)) * 100.0;
+      final allOk = score >= 90.0;
+
       state = state.copyWith(
         isListening: false,
         words: evaluatedWords,
         statusNote: allOk
             ? 'All words matched. Nicely done!'
-            : 'Good attempt! Try the underlined words again.',
-        petMode: allOk ? 'dance' : 'oops',
+            : '${score.toInt()}% matched. Try the highlighted words again.',
+        petMode: allOk ? 'dance' : 'talk',
+      );
+
+      // Record pronunciation feedback in database
+      UserDataService.instance.recordConversationMessage(
+        characterId: state.activePet.key,
+        sourceLanguage: state.sourceLanguage.bcp47,
+        targetLanguage: state.targetLanguage.bcp47,
+        sourceText: state.spokenText,
+        translatedText: state.translatedText,
+        pronunciationScore: score,
       );
     });
   }

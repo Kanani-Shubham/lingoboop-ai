@@ -1,23 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/services/user_data_service.dart';
 import '../../companion/presentation/companion_state.dart';
-
-class WordProgressItem {
-  final String word;
-  final String translation;
-  final double masteryScore;
-  final int repetitionCount;
-  final bool isDue;
-
-  const WordProgressItem({
-    required this.word,
-    required this.translation,
-    required this.masteryScore,
-    required this.repetitionCount,
-    required this.isDue,
-  });
-}
 
 class ProgressScreen extends ConsumerStatefulWidget {
   const ProgressScreen({super.key});
@@ -28,52 +13,38 @@ class ProgressScreen extends ConsumerStatefulWidget {
 
 class _ProgressScreenState extends ConsumerState<ProgressScreen> {
   String _activeFilter = 'all';
+  bool _isLoading = true;
+  List<Map<String, dynamic>> _progressItems = [];
 
-  final List<WordProgressItem> _words = const [
-    WordProgressItem(
-      word: 'ચોખા (Chokhā)',
-      translation: 'Rice',
-      masteryScore: 95.0,
-      repetitionCount: 6,
-      isDue: false,
-    ),
-    WordProgressItem(
-      word: 'ઘી (Ghī)',
-      translation: 'Clarified butter (Ghee)',
-      masteryScore: 88.0,
-      repetitionCount: 4,
-      isDue: false,
-    ),
-    WordProgressItem(
-      word: 'સુરતની ટ્રેન (Suratnī ṭrēna)',
-      translation: 'Train to Surat',
-      masteryScore: 62.0,
-      repetitionCount: 2,
-      isDue: true,
-    ),
-    WordProgressItem(
-      word: 'બપોરનું ભોજન (Bapōranũ bhōjana)',
-      translation: 'Lunch',
-      masteryScore: 45.0,
-      repetitionCount: 1,
-      isDue: true,
-    ),
-    WordProgressItem(
-      word: 'મોટેથી બોલો (Mōṭēthī bōlō)',
-      translation: 'Speak out loud',
-      masteryScore: 78.0,
-      repetitionCount: 3,
-      isDue: false,
-    ),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadProgress();
+  }
+
+  Future<void> _loadProgress() async {
+    setState(() => _isLoading = true);
+    final items = await UserDataService.instance.getLearningProgress();
+    if (mounted) {
+      setState(() {
+        _progressItems = items;
+        _isLoading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(companionProvider);
+    final companionState = ref.watch(companionProvider);
 
-    final filtered = _words.where((w) {
-      if (_activeFilter == 'due') return w.isDue;
-      if (_activeFilter == 'mastered') return w.masteryScore >= 80;
+    final filteredItems = _progressItems.where((item) {
+      final score = (item['mastery_score'] as num?)?.toDouble() ?? 0.0;
+      if (_activeFilter == 'due') {
+        final nextReview = DateTime.tryParse(item['next_review_at']?.toString() ?? '');
+        return nextReview != null && nextReview.isBefore(DateTime.now());
+      } else if (_activeFilter == 'mastered') {
+        return score >= 85.0;
+      }
       return true;
     }).toList();
 
@@ -82,171 +53,216 @@ class _ProgressScreenState extends ConsumerState<ProgressScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text(
+        title: Text(
           'Learning Progress',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-            color: AppColors.textDark,
-          ),
-        ),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.textDark, size: 20),
-          onPressed: () => Navigator.pop(context),
+          style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                fontSize: 22,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textDark,
+              ),
         ),
       ),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Summary Banner
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Color(0x0A000000),
-                      blurRadius: 10,
-                      offset: Offset(0, 3),
-                    ),
-                  ],
+        child: RefreshIndicator(
+          onRefresh: _loadProgress,
+          color: companionState.activePet.accentColor,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 8),
+
+                // Summary Stats Card (Calculated from real records)
+                Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: AppColors.borderSoft, width: 1.0),
+                    boxShadow: const [
+                      BoxShadow(color: Color(0x08000000), blurRadius: 10, offset: Offset(0, 3)),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _buildMetric(
+                        title: 'Words Learned',
+                        value: '${_progressItems.length}',
+                        color: companionState.activePet.accentColor,
+                      ),
+                      Container(width: 1, height: 40, color: AppColors.border),
+                      _buildMetric(
+                        title: 'Mastered',
+                        value: '${_progressItems.where((i) => ((i['mastery_score'] as num?)?.toDouble() ?? 0.0) >= 85).length}',
+                        color: AppColors.catMimi,
+                      ),
+                      Container(width: 1, height: 40, color: AppColors.border),
+                      _buildMetric(
+                        title: 'To Review',
+                        value: '${_progressItems.where((i) {
+                          final nr = DateTime.tryParse(i['next_review_at']?.toString() ?? '');
+                          return nr != null && nr.isBefore(DateTime.now());
+                        }).length}',
+                        color: AppColors.foxMaru,
+                      ),
+                    ],
+                  ),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+
+                const SizedBox(height: 16),
+
+                // Filter Chips
+                Row(
                   children: [
-                    _buildSummaryMetric('Total Words', '${_words.length}'),
-                    _buildSummaryMetric('Due Today', '${_words.where((w) => w.isDue).length}'),
-                    _buildSummaryMetric('Mastered', '${_words.where((w) => w.masteryScore >= 80).length}'),
+                    _buildFilterChip('All Words', 'all', companionState.activePet.accentColor),
+                    const SizedBox(width: 8),
+                    _buildFilterChip('Ready to Review', 'due', companionState.activePet.accentColor),
+                    const SizedBox(width: 8),
+                    _buildFilterChip('Mastered', 'mastered', companionState.activePet.accentColor),
                   ],
                 ),
-              ),
 
-              const SizedBox(height: 18),
+                const SizedBox(height: 12),
 
-              // Filter Chips
-              Row(
-                children: [
-                  _buildFilterChip('All Words', 'all', state.activePet.accentColor),
-                  const SizedBox(width: 8),
-                  _buildFilterChip('Due for Review', 'due', state.activePet.accentColor),
-                  const SizedBox(width: 8),
-                  _buildFilterChip('Mastered', 'mastered', state.activePet.accentColor),
-                ],
-              ),
-
-              const SizedBox(height: 14),
-
-              // Word Cards List
-              Expanded(
-                child: ListView.builder(
-                  itemCount: filtered.length,
-                  itemBuilder: (context, i) {
-                    final item = filtered[i];
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: item.isDue ? state.activePet.accentColor.withValues(alpha: 0.5) : Colors.transparent,
-                          width: 1.5,
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  item.word,
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.textDark,
+                // Vocabulary List / Empty State
+                Expanded(
+                  child: _isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : filteredItems.isEmpty
+                          ? Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.auto_stories_outlined,
+                                    size: 54,
+                                    color: AppColors.textMuted.withValues(alpha: 0.6),
                                   ),
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  item.translation,
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    color: AppColors.textMuted,
+                                  const SizedBox(height: 12),
+                                  const Text(
+                                    'No words recorded yet',
+                                    style: TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.textDark,
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(height: 8),
-                                Row(
-                                  children: [
-                                    Text(
-                                      'Mastery: ${item.masteryScore.toStringAsFixed(0)}%',
+                                  const SizedBox(height: 6),
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(horizontal: 32),
+                                    child: Text(
+                                      'Practice speaking with your buddy. New vocabulary will automatically be saved for spaced repetition review here.',
+                                      textAlign: TextAlign.center,
                                       style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: state.activePet.accentColor,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Text(
-                                      'Reps: ${item.repetitionCount}',
-                                      style: const TextStyle(
-                                        fontSize: 12,
+                                        fontSize: 14,
                                         color: AppColors.textMuted,
+                                        height: 1.4,
                                       ),
                                     ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                          if (item.isDue)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: state.activePet.accentColor.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ],
                               ),
-                              child: Text(
-                                'Review Due',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: state.activePet.accentColor,
-                                ),
-                              ),
+                            )
+                          : ListView.builder(
+                              itemCount: filteredItems.length,
+                              itemBuilder: (context, i) {
+                                final item = filteredItems[i];
+                                final word = item['word_phrase']?.toString() ?? '';
+                                final trans = item['translation']?.toString() ?? '';
+                                final score = (item['mastery_score'] as num?)?.toDouble() ?? 0.0;
+                                final reps = (item['repetition_count'] as num?)?.toInt() ?? 1;
+
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 10),
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(color: AppColors.borderSoft, width: 1.0),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              word,
+                                              style: const TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w600,
+                                                color: AppColors.textDark,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              trans,
+                                              style: const TextStyle(
+                                                fontSize: 13,
+                                                color: AppColors.textMuted,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.end,
+                                        children: [
+                                          Text(
+                                            '${score.toInt()}%',
+                                            style: TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w600,
+                                              color: score >= 80
+                                                  ? AppColors.catMimi
+                                                  : score >= 50
+                                                      ? AppColors.foxMaru
+                                                      : AppColors.textMuted,
+                                            ),
+                                          ),
+                                          Text(
+                                            '$reps reps',
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                              color: AppColors.textMuted,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
                             ),
-                        ],
-                      ),
-                    );
-                  },
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildSummaryMetric(String title, String value) {
+  Widget _buildMetric({required String title, required String value, required Color color}) {
     return Column(
       children: [
         Text(
           value,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 22,
             fontWeight: FontWeight.w600,
-            color: AppColors.textDark,
+            color: color,
           ),
         ),
         const SizedBox(height: 2),
         Text(
           title,
-          style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+          style: const TextStyle(
+            fontSize: 12,
+            color: AppColors.textMuted,
+          ),
         ),
       ],
     );
