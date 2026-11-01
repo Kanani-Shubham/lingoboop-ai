@@ -38,3 +38,4 @@ async def transcribe_audio(
         success=True,
         data=result.model_dump()
     )
+

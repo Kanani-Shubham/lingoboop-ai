@@ -86,3 +86,4 @@ async def test_stt_empty_audio_validation():
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["error_code"] == "EMPTY_AUDIO"
+

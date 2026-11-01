@@ -20,6 +20,11 @@ async def health_check():
                 "stt_model": settings.GNANI_STT_DEFAULT_MODEL,
                 "tts_model": settings.GNANI_TTS_DEFAULT_MODEL,
                 "api_key_status": "present" if settings.is_gnani_configured() else "missing"
+            },
+            "supabase": {
+                "configured": settings.is_supabase_configured(),
+                "service_role_configured": settings.is_supabase_service_role_configured()
             }
         }
     )
+

@@ -27,3 +27,4 @@ async def synthesize_speech(
         success=True,
         data=result.model_dump()
     )
+

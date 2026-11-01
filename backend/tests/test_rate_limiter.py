@@ -29,3 +29,4 @@ def test_usage_tracking():
     u2 = limiter.record_audio_usage("user_test_3", 4.5)
     assert u2 == 10.0
     assert limiter.get_user_usage("user_test_3") == 10.0
+

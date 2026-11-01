@@ -122,3 +122,4 @@ class GnaniTTSProvider(BaseTTSProvider):
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail={"error_code": "NETWORK_ERROR", "message": "Failed to connect to Gnani TTS API."}
             )
+

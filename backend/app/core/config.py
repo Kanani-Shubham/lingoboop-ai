@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     GNANI_REQUEST_TIMEOUT_SECONDS: float = 30.0
     RATE_LIMIT_REQUESTS_PER_MINUTE: int = 60
 
+    # Supabase Configuration
+    SUPABASE_URL: Optional[str] = Field(default=None, description="Supabase project URL")
+    SUPABASE_ANON_KEY: Optional[str] = Field(default=None, description="Supabase public anon key")
+    SUPABASE_SERVICE_ROLE_KEY: Optional[str] = Field(default=None, description="Supabase backend-only service role key")
+    DATABASE_URL: Optional[str] = Field(default=None, description="Direct PostgreSQL database connection URL")
+
     # Pydantic Settings Config: check backend/.env first, then root .env
     model_config = SettingsConfigDict(
         env_file=(
@@ -79,12 +85,34 @@ class Settings(BaseSettings):
             return "***"
         return f"{raw[:4]}...{raw[-4:]}"
 
+    def is_supabase_configured(self) -> bool:
+        """Check whether Supabase URL and keys are configured."""
+        if not self.SUPABASE_URL or not self.SUPABASE_ANON_KEY:
+            return False
+        return not self.SUPABASE_URL.startswith("https://your-project-id") and not self.SUPABASE_ANON_KEY.startswith("your_")
+
+    def is_supabase_service_role_configured(self) -> bool:
+        """Check whether backend service role key is configured."""
+        if not self.SUPABASE_SERVICE_ROLE_KEY:
+            return False
+        return not self.SUPABASE_SERVICE_ROLE_KEY.startswith("your_")
+
+    def masked_supabase_service_role(self) -> str:
+        if not self.is_supabase_service_role_configured():
+            return "UNCONFIGURED"
+        raw = self.SUPABASE_SERVICE_ROLE_KEY.strip()
+        if len(raw) <= 8:
+            return "***"
+        return f"{raw[:4]}...{raw[-4:]}"
+
     def __repr__(self) -> str:
         """Prevent secrets from leaking when settings object is printed or logged."""
         return (
             f"Settings(APP_ENV='{self.APP_ENV}', "
             f"GNANI_BASE_URL='{self.GNANI_BASE_URL}', "
             f"GNANI_API_KEY='{self.masked_gnani_key()}', "
+            f"SUPABASE_URL='{self.SUPABASE_URL}', "
+            f"SUPABASE_SERVICE_ROLE='{self.masked_supabase_service_role()}', "
             f"STT_MODEL='{self.GNANI_STT_DEFAULT_MODEL}', "
             f"TTS_MODEL='{self.GNANI_TTS_DEFAULT_MODEL}')"
         )

@@ -50,3 +50,4 @@ async def test_swappable_tts_provider_contract():
     res = await provider.synthesize(TTSRequest(text="Hello world"))
     assert isinstance(res, TTSResponseMetadata)
     assert res.audio_base64 == "ZHVtbXlfc3BlZWNo"
+

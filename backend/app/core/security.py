@@ -17,3 +17,4 @@ async def verify_client_token(authorization: Optional[str] = Header(None)) -> st
         return parts[1]  # Return user token/id
     
     return "dev_guest_user"
+

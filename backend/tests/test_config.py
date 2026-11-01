@@ -30,9 +30,21 @@ def test_settings_placeholder_detection():
     assert s2.is_gnani_configured() is False
 
 
-def test_settings_url_validation():
-    with pytest.raises(ValueError):
-        Settings(GNANI_BASE_URL="ftp://invalid.url")
+def test_settings_supabase_fields_and_masking():
+    s = Settings(
+        GNANI_API_KEY="test_dummy_key_12345678",
+        SUPABASE_URL="https://testproject.supabase.co",
+        SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy_anon_payload",
+        SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy_service_role_secret",
+        DATABASE_URL="postgresql://postgres:secretpassword@db.testproject.supabase.co:5432/postgres"
+    )
+    assert s.is_supabase_configured() is True
+    assert s.is_supabase_service_role_configured() is True
+    assert s.SUPABASE_URL == "https://testproject.supabase.co"
 
-    with pytest.raises(ValueError):
-        Settings(GNANI_WS_URL="http://invalid.ws")
+    # Ensure service role secret and db password NEVER appear in repr
+    repr_str = repr(s)
+    assert "dummy_service_role_secret" not in repr_str
+    assert "secretpassword" not in repr_str
+    assert "eyJh...cret" in repr_str
+

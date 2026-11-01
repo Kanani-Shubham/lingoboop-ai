@@ -54,3 +54,4 @@ class InMemoryRateLimiter:
 rate_limiter = InMemoryRateLimiter(
     max_requests_per_minute=settings.RATE_LIMIT_REQUESTS_PER_MINUTE
 )
+

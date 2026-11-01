@@ -78,3 +78,4 @@ async def test_tts_auth_failure_mocked():
 
         assert exc_info.value.status_code == 401
         assert exc_info.value.detail["error_code"] == "AUTHENTICATION_FAILED"
+

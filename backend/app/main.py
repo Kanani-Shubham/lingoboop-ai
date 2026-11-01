@@ -63,3 +63,4 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 app.include_router(health.router)
 app.include_router(stt.router)
 app.include_router(tts.router)
+

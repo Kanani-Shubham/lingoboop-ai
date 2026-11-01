@@ -22,3 +22,4 @@ class STTResponseData(BaseModel):
     words: Optional[List[WordConfidence]] = None
     duration_seconds: Optional[float] = None
     raw_response: Optional[dict] = None
+

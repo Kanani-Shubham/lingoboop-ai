@@ -35,3 +35,4 @@ class BaseTTSProvider(ABC):
     ) -> TTSResponseMetadata:
         """Synthesize text into speech audio bytes (base64 encoded)."""
         pass
+
