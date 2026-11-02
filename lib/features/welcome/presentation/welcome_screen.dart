@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/character_data.dart';
+import '../../../core/widgets/floating_pet_avatar.dart';
 
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key});
@@ -20,25 +21,16 @@ class WelcomeScreen extends StatelessWidget {
             children: [
               const Spacer(),
 
-              // Floating Character Hero Avatar
+              // Floating 3D Character Hero Avatar
               Center(
-                child: Container(
-                  width: 170,
-                  height: 170,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: maru.accentColor.withValues(alpha: 0.25),
-                        blurRadius: 32,
-                        offset: const Offset(0, 12),
-                      ),
-                    ],
-                  ),
-                  child: Image.asset(
-                    maru.previewAsset,
-                    fit: BoxFit.contain,
-                  ),
+                child: FloatingPetAvatar(
+                  character: maru,
+                  mode: 'idle',
+                  size: 170,
+                  showHint: false,
+                  onTap: () {},
+                  onDragUpdate: (_) {},
+                  onDragEnd: () {},
                 ),
               ),
 
@@ -85,7 +77,7 @@ class WelcomeScreen extends StatelessWidget {
                     elevation: 0,
                   ),
                   onPressed: () {
-                    Navigator.pushNamed(context, '/onboarding/languages');
+                    Navigator.pushNamed(context, '/signup');
                   },
                   child: const Text(
                     'Get Started',

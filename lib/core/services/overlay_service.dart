@@ -7,6 +7,11 @@ class OverlayService {
   static final OverlayService instance = OverlayService._();
 
   static const MethodChannel _channel = MethodChannel('com.lingoboop.app/overlay');
+  static const EventChannel _eventChannel = EventChannel('com.lingoboop.app/overlay_events');
+  Stream<dynamic>? _overlayEvents;
+
+  Stream<dynamic> get overlayEvents =>
+      _overlayEvents ??= _eventChannel.receiveBroadcastStream();
 
   /// Check whether Android "Display Over Other Apps" permission is granted
   Future<bool> checkPermission() async {
@@ -112,3 +117,4 @@ class OverlayService {
     }
   }
 }
+

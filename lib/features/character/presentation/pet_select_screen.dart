@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/character_data.dart';
+import '../../../core/widgets/floating_pet_avatar.dart';
 import '../../companion/presentation/companion_state.dart';
 
 class PetSelectScreen extends ConsumerStatefulWidget {
@@ -100,12 +101,17 @@ class _PetSelectScreenState extends ConsumerState<PetSelectScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        // Pet Preview Image
+                        // 3D Pet Avatar
                         Expanded(
                           child: Center(
-                            child: Image.asset(
-                              pet.previewAsset,
-                              fit: BoxFit.contain,
+                            child: FloatingPetAvatar(
+                              character: pet,
+                              mode: isSelected ? 'dance' : 'idle',
+                              size: 150,
+                              showHint: false,
+                              onTap: () {},
+                              onDragUpdate: (_) {},
+                              onDragEnd: () {},
                             ),
                           ),
                         ),

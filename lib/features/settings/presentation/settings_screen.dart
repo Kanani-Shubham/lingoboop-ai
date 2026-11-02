@@ -42,10 +42,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> with WidgetsBin
   Future<void> _checkOverlayState() async {
     final hasPerm = await OverlayService.instance.checkPermission();
     final isRunning = await OverlayService.instance.isOverlayRunning();
+    final prefs = await UserDataService.instance.getPreferences();
+    final savedEnabled = prefs?['overlay_enabled'] as bool?;
+
     if (mounted) {
       setState(() {
         _hasOverlayPermission = hasPerm;
-        _overlayRunning = isRunning;
+        _overlayRunning = isRunning || (hasPerm && (savedEnabled ?? false));
       });
     }
   }
@@ -96,9 +99,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> with WidgetsBin
         targetLang: companionState.targetLanguage.bcp47,
       );
 
+      // Persist to Supabase preferences
+      await UserDataService.instance.savePreferences(overlayEnabled: true);
+
       if (mounted) setState(() => _overlayRunning = ok);
     } else {
       final ok = await OverlayService.instance.stopOverlay();
+      // Persist to Supabase preferences
+      await UserDataService.instance.savePreferences(overlayEnabled: false);
       if (mounted) setState(() => _overlayRunning = !ok);
     }
   }
@@ -145,7 +153,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> with WidgetsBin
                     contentPadding: EdgeInsets.zero,
                     activeThumbColor: state.activePet.accentColor,
                     title: const Text(
-                      'Floating Android Buddy',
+                      'Enable Floating Pet',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
@@ -153,7 +161,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> with WidgetsBin
                       ),
                     ),
                     subtitle: const Text(
-                      'Floats over other apps (WhatsApp, Chrome, YouTube). Stays available even after closing LingoBoom.',
+                      'Floats over other apps (WhatsApp, Chrome, YouTube). Stays available even after leaving LingoBoom.',
                       style: TextStyle(fontSize: 13, color: AppColors.textMuted, height: 1.3),
                     ),
                     value: _overlayRunning,

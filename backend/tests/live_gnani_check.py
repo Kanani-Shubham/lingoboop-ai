@@ -90,8 +90,9 @@ async def check_live_api():
     # 3. Probe Streaming STT WebSocket Authorization (Requirement 7)
     print("\n--- 3. Probing Live STT Streaming WebSocket Availability ---")
     ws_stt_url = f"{settings.GNANI_WS_URL}{settings.GNANI_STT_STREAM_PATH}"
+    gnani_key = (settings.GNANI_API_KEY or "").strip()
     ws_headers = {
-        "X-API-Key-ID": settings.GNANI_API_KEY.strip(),
+        "X-API-Key-ID": gnani_key,
         "x-model": settings.GNANI_STT_DEFAULT_MODEL,
         "x-language-code": "hi-IN"
     }
@@ -112,7 +113,7 @@ async def check_live_api():
     try:
         async with websockets.connect(
             ws_tts_url,
-            additional_headers={"X-API-Key-ID": settings.GNANI_API_KEY.strip()},
+            additional_headers={"X-API-Key-ID": gnani_key},
             open_timeout=5.0
         ) as ws:
             print("[SUCCESS] TTS WebSocket handshake succeeded! Streaming TTS is active on this API key.")

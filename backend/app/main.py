@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.core.config import settings
-from app.routers import health, stt, tts
+from app.routers import ai, health, stt, translation, tts
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -30,7 +30,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         msg = detail.get("message", "An error occurred")
     else:
         code = "HTTP_ERROR"
-        msg = str(detail)
+        msg = detail
 
     return JSONResponse(
         status_code=exc.status_code,
@@ -61,6 +61,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 # Include API Routers
 app.include_router(health.router)
+app.include_router(ai.router)
 app.include_router(stt.router)
+app.include_router(translation.router)
 app.include_router(tts.router)
 

@@ -16,20 +16,33 @@ class Settings(BaseSettings):
     HOST: str = "127.0.0.1"
     PORT: int = 8000
 
+    # -------------------------------------------------------------------------
+    # Groq Cloud AI Intelligence Configuration (openai/gpt-oss-120b)
+    # -------------------------------------------------------------------------
+    GROQ_API_KEY: Optional[str] = Field(default=None, description="Groq Cloud API Key")
+    GROQ_MODEL: str = Field(default="openai/gpt-oss-120b", description="Default Groq LLM model")
+    GROQ_BASE_URL: str = Field(default="https://api.groq.com/openai/v1", description="Groq REST base URL")
+    GROQ_TIMEOUT_SECONDS: float = Field(default=30.0, description="Groq API timeout in seconds")
+
+    # -------------------------------------------------------------------------
     # Gnani.ai / Vachana VoiceOS Configuration
+    # -------------------------------------------------------------------------
     GNANI_BASE_URL: str = Field(default="https://api.vachana.ai", description="Official Gnani/Vachana HTTPS base URL")
     GNANI_WS_URL: str = Field(default="wss://api.vachana.ai", description="Official Gnani/Vachana WebSocket base URL")
     GNANI_API_KEY: Optional[str] = Field(default=None, description="Dashboard API Key with STT & TTS scopes")
+    GNANI_API_KEY_ID: Optional[str] = Field(default=None, description="Alias for Gnani API Key ID header")
 
     # STT Settings (Prisma)
     GNANI_STT_PATH: str = Field(default="/stt/v3", description="REST endpoint for Prisma STT")
     GNANI_STT_STREAM_PATH: str = Field(default="/stt/v3/stream", description="Streaming WebSocket endpoint")
+    GNANI_STT_MODEL: Optional[str] = Field(default=None, description="Override model for STT")
     GNANI_STT_DEFAULT_MODEL: str = "prisma-v3.0"
 
     # TTS Settings (Timbre)
     GNANI_TTS_PATH: str = Field(default="/api/v1/tts/inference", description="REST endpoint for Timbre TTS inference")
     GNANI_TTS_SSE_PATH: str = Field(default="/api/v1/tts/sse", description="Server-Sent Events endpoint")
     GNANI_TTS_WS_PATH: str = Field(default="/api/v1/tts", description="Real-time WebSocket endpoint")
+    GNANI_TTS_MODEL: Optional[str] = Field(default=None, description="Override model for TTS")
     GNANI_TTS_DEFAULT_MODEL: str = "timbre-v3.0"
     GNANI_TTS_DEFAULT_VOICE: str = "Shivani"
 
@@ -37,7 +50,9 @@ class Settings(BaseSettings):
     GNANI_REQUEST_TIMEOUT_SECONDS: float = 30.0
     RATE_LIMIT_REQUESTS_PER_MINUTE: int = 60
 
+    # -------------------------------------------------------------------------
     # Supabase Configuration
+    # -------------------------------------------------------------------------
     SUPABASE_URL: Optional[str] = Field(default=None, description="Supabase project URL")
     SUPABASE_ANON_KEY: Optional[str] = Field(default=None, description="Supabase public anon key")
     SUPABASE_SERVICE_ROLE_KEY: Optional[str] = Field(default=None, description="Supabase backend-only service role key")
@@ -69,18 +84,39 @@ class Settings(BaseSettings):
             raise ValueError("GNANI_WS_URL must start with ws:// or wss://")
         return v
 
+    def get_gnani_key(self) -> Optional[str]:
+        """Resolves the configured Gnani API key from either GNANI_API_KEY_ID or GNANI_API_KEY."""
+        return self.GNANI_API_KEY_ID or self.GNANI_API_KEY
+
     def is_gnani_configured(self) -> bool:
-        """Check whether a non-empty, non-placeholder API key is configured."""
-        if not self.GNANI_API_KEY:
+        """Check whether a non-empty, non-placeholder Gnani API key is configured."""
+        raw = self.get_gnani_key()
+        if not raw:
             return False
-        val = self.GNANI_API_KEY.strip()
-        return len(val) > 0 and val != "your_gnani_dashboard_api_key_here" and val != "your_gnani_api_key_here"
+        val = raw.strip()
+        return len(val) > 0 and not val.startswith("your_")
 
     def masked_gnani_key(self) -> str:
-        """Returns a safely masked key string (e.g. 'gn_...abc') without exposing the secret."""
+        """Returns a safely masked key string (e.g. 'gn_...abc') without exposing secrets."""
         if not self.is_gnani_configured():
             return "UNCONFIGURED"
-        raw = self.GNANI_API_KEY.strip()
+        raw = (self.get_gnani_key() or "").strip()
+        if len(raw) <= 8:
+            return "***"
+        return f"{raw[:4]}...{raw[-4:]}"
+
+    def is_groq_configured(self) -> bool:
+        """Check whether a valid non-empty Groq API key is configured."""
+        if not self.GROQ_API_KEY:
+            return False
+        val = self.GROQ_API_KEY.strip()
+        return len(val) > 0 and not val.startswith("your_")
+
+    def masked_groq_key(self) -> str:
+        """Returns a safely masked Groq key string without exposing secrets."""
+        if not self.is_groq_configured() or not self.GROQ_API_KEY:
+            return "UNCONFIGURED"
+        raw = self.GROQ_API_KEY.strip()
         if len(raw) <= 8:
             return "***"
         return f"{raw[:4]}...{raw[-4:]}"
@@ -98,7 +134,7 @@ class Settings(BaseSettings):
         return not self.SUPABASE_SERVICE_ROLE_KEY.startswith("your_")
 
     def masked_supabase_service_role(self) -> str:
-        if not self.is_supabase_service_role_configured():
+        if not self.is_supabase_service_role_configured() or not self.SUPABASE_SERVICE_ROLE_KEY:
             return "UNCONFIGURED"
         raw = self.SUPABASE_SERVICE_ROLE_KEY.strip()
         if len(raw) <= 8:
@@ -109,12 +145,14 @@ class Settings(BaseSettings):
         """Prevent secrets from leaking when settings object is printed or logged."""
         return (
             f"Settings(APP_ENV='{self.APP_ENV}', "
+            f"GROQ_MODEL='{self.GROQ_MODEL}', "
+            f"GROQ_KEY='{self.masked_groq_key()}', "
             f"GNANI_BASE_URL='{self.GNANI_BASE_URL}', "
-            f"GNANI_API_KEY='{self.masked_gnani_key()}', "
+            f"GNANI_KEY='{self.masked_gnani_key()}', "
             f"SUPABASE_URL='{self.SUPABASE_URL}', "
             f"SUPABASE_SERVICE_ROLE='{self.masked_supabase_service_role()}', "
-            f"STT_MODEL='{self.GNANI_STT_DEFAULT_MODEL}', "
-            f"TTS_MODEL='{self.GNANI_TTS_DEFAULT_MODEL}')"
+            f"STT_MODEL='{self.GNANI_STT_MODEL or self.GNANI_STT_DEFAULT_MODEL}', "
+            f"TTS_MODEL='{self.GNANI_TTS_MODEL or self.GNANI_TTS_DEFAULT_MODEL}')"
         )
 
 

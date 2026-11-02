@@ -7,14 +7,33 @@ import android.provider.Settings
 import com.lingoboop.lingoboop.overlay.FloatingPetService
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
 
     private val CHANNEL = "com.lingoboop.app/overlay"
+    private val EVENT_CHANNEL = "com.lingoboop.app/overlay_events"
+
+    companion object {
+        var eventSink: EventChannel.EventSink? = null
+        var isAppInForeground: Boolean = false
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, EVENT_CHANNEL).setStreamHandler(
+            object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    eventSink = events
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    eventSink = null
+                }
+            }
+        )
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
@@ -62,6 +81,12 @@ class MainActivity : FlutterActivity() {
                     } else {
                         startService(intent)
                     }
+                    if (isAppInForeground) {
+                        val hideIntent = Intent(this, FloatingPetService::class.java).apply {
+                            action = FloatingPetService.ACTION_HIDE_OVERLAY
+                        }
+                        startService(hideIntent)
+                    }
                     result.success(true)
                 }
                 "stopOverlay" -> {
@@ -102,6 +127,38 @@ class MainActivity : FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra("open_card", false)) {
+            try {
+                eventSink?.success(mapOf("event" to "open_card_requested"))
+            } catch (_: Exception) {}
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        isAppInForeground = true
+        if (FloatingPetService.isRunning) {
+            val intent = Intent(this, FloatingPetService::class.java).apply {
+                action = FloatingPetService.ACTION_HIDE_OVERLAY
+            }
+            startService(intent)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        isAppInForeground = false
+        if (FloatingPetService.isRunning) {
+            val intent = Intent(this, FloatingPetService::class.java).apply {
+                action = FloatingPetService.ACTION_SHOW_OVERLAY
+            }
+            startService(intent)
         }
     }
 }

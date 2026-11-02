@@ -3,6 +3,8 @@ import 'package:lingoboop/core/constants/app_colors.dart';
 import 'package:lingoboop/features/companion/presentation/companion_state.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('CompanionNotifier Riverpod State Management Tests', () {
     late CompanionNotifier notifier;
 
@@ -52,6 +54,14 @@ void main() {
       notifier.toggleCard();
       expect(notifier.state.isCardOpen, isFalse);
       expect(notifier.state.petMode, 'idle');
+    });
+
+    test('Setting petMode explicitly updates state across prototype animation modes', () {
+      const modes = ['walk', 'dance', 'think', 'talk', 'listen', 'drag', 'oops', 'cheer'];
+      for (final m in modes) {
+        notifier.setPetMode(m);
+        expect(notifier.state.petMode, m);
+      }
     });
 
     test('Submitting typed sentence triggers translation and populates karaoke words', () async {

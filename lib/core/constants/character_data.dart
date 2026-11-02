@@ -90,8 +90,17 @@ class CharacterRegistry {
   ];
 
   static CharacterModel getByKey(String key) {
+    final normalized = switch (key.toLowerCase().trim()) {
+      'maru' => 'fox',
+      'mimi' => 'cat',
+      'pano' => 'panda',
+      'bun' => 'bunny',
+      'pip' => 'penguin',
+      'leo' => 'lion',
+      _ => key.toLowerCase().trim(),
+    };
     return allCharacters.firstWhere(
-      (c) => c.key == key,
+      (c) => c.key == normalized,
       orElse: () => allCharacters.first,
     );
   }

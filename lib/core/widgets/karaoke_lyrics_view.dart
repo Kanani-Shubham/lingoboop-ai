@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../constants/app_colors.dart';
 
@@ -32,13 +33,13 @@ class KaraokeLyricsView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (words.isEmpty) {
-      return const SizedBox(
-        height: 62,
+      return SizedBox(
+        height: 62, // min-height: 62px
         child: Align(
           alignment: Alignment.centerLeft,
           child: Text(
-            'Tap mic and speak...',
-            style: TextStyle(
+            'Tap mic and speak…',
+            style: GoogleFonts.fredoka(
               fontSize: 22,
               fontWeight: FontWeight.w600,
               color: AppColors.wordKaraokeDim,
@@ -67,10 +68,10 @@ class KaraokeLyricsView extends StatelessWidget {
             );
           }
 
-          TextStyle style = TextStyle(
-            fontSize: 24,
+          final style = GoogleFonts.fredoka(
+            fontSize: 25, // Exact prototype font-size: 25px
             fontWeight: FontWeight.w600,
-            height: 1.22,
+            height: 1.22, // Exact prototype line-height: 1.22
             color: isLit ? AppColors.wordKaraokeLit : AppColors.wordKaraokeDim,
             decoration: isMiss ? TextDecoration.underline : TextDecoration.none,
             decorationColor: isMiss ? AppColors.practiceMissUnderline : null,

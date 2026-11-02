@@ -327,7 +327,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.borderSoft, width: 1.0),
       ),
-      child: ListTile(
+      child: Material(
+        color: Colors.transparent,
+        child: ListTile(
         leading: Container(
           width: 40,
           height: 40,
@@ -352,6 +354,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: AppColors.textMuted),
         onTap: onTap,
       ),
-    );
+    ),
+  );
   }
 }

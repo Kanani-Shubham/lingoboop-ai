@@ -1,18 +1,22 @@
-import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../constants/app_colors.dart';
 import '../constants/character_data.dart';
 
+/// Exact 3D Floating Pet Canvas matching #pw and #cv in `polypet-demo.html`
 class FloatingPetAvatar extends StatefulWidget {
   final CharacterModel character;
-  final String mode; // 'idle', 'walk', 'dance', 'think', 'talk', 'listen', 'drag'
+  final String mode; // 'idle', 'walk', 'dance', 'think', 'talk', 'listen', 'drag', 'oops', 'cheer'
   final VoidCallback onTap;
   final ValueChanged<Offset> onDragUpdate;
   final VoidCallback onDragEnd;
   final bool showHint;
   final double size;
+  final double? facing; // Rotation angle in radians
+  final bool isCardOpen;
+  final String dockSide; // 'r' or 'l'
 
   const FloatingPetAvatar({
     super.key,
@@ -23,26 +27,22 @@ class FloatingPetAvatar extends StatefulWidget {
     required this.onDragEnd,
     this.showHint = true,
     this.size = 150.0,
+    this.facing,
+    this.isCardOpen = false,
+    this.dockSide = 'r',
   });
 
   @override
   State<FloatingPetAvatar> createState() => _FloatingPetAvatarState();
 }
 
-class _FloatingPetAvatarState extends State<FloatingPetAvatar>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _idleController;
+class _FloatingPetAvatarState extends State<FloatingPetAvatar> {
   WebViewController? _webController;
   bool _isWebViewReady = false;
 
   @override
   void initState() {
     super.initState();
-    _idleController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1800),
-    )..repeat(reverse: true);
-
     _initWeb3DViewer();
   }
 
@@ -61,6 +61,10 @@ class _FloatingPetAvatarState extends State<FloatingPetAvatar>
                 setState(() => _isWebViewReady = true);
                 _updatePetInViewer(widget.character.key);
                 _updateModeInViewer(widget.mode);
+                _updateDockInViewer(widget.isCardOpen, widget.dockSide);
+                if (widget.facing != null) {
+                  _updateFacingInViewer(widget.facing!);
+                }
               }
             },
           ),
@@ -84,6 +88,18 @@ class _FloatingPetAvatarState extends State<FloatingPetAvatar>
     }
   }
 
+  void _updateFacingInViewer(double facing) {
+    if (_isWebViewReady && _webController != null) {
+      _webController?.runJavaScript("if (window.setFacing) window.setFacing($facing);");
+    }
+  }
+
+  void _updateDockInViewer(bool open, String side) {
+    if (_isWebViewReady && _webController != null) {
+      _webController?.runJavaScript("if (window.setCardDock) window.setCardDock($open, '$side');");
+    }
+  }
+
   @override
   void didUpdateWidget(covariant FloatingPetAvatar oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -93,12 +109,12 @@ class _FloatingPetAvatarState extends State<FloatingPetAvatar>
     if (oldWidget.mode != widget.mode) {
       _updateModeInViewer(widget.mode);
     }
-  }
-
-  @override
-  void dispose() {
-    _idleController.dispose();
-    super.dispose();
+    if (oldWidget.isCardOpen != widget.isCardOpen || oldWidget.dockSide != widget.dockSide) {
+      _updateDockInViewer(widget.isCardOpen, widget.dockSide);
+    }
+    if (widget.facing != null && widget.facing != oldWidget.facing) {
+      _updateFacingInViewer(widget.facing!);
+    }
   }
 
   @override
@@ -107,99 +123,59 @@ class _FloatingPetAvatarState extends State<FloatingPetAvatar>
       onTap: widget.onTap,
       onPanUpdate: (details) => widget.onDragUpdate(details.delta),
       onPanEnd: (_) => widget.onDragEnd(),
-      child: AnimatedBuilder(
-        animation: _idleController,
-        builder: (context, child) {
-          double floatY = 0;
-          double tilt = 0;
-          double scaleY = 1.0;
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
+        children: [
+          // 3D Pet Character Preview (unclipped, fully transparent canvas)
+          SizedBox(
+            width: widget.size,
+            height: widget.size,
+            child: _webController != null && !kIsWeb
+                ? IgnorePointer(
+                    child: WebViewWidget(controller: _webController!),
+                  )
+                : Image.asset(
+                    widget.character.previewAsset,
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.high,
+                  ),
+          ),
 
-          if (widget.mode == 'idle') {
-            floatY = math.sin(_idleController.value * math.pi) * 6;
-          } else if (widget.mode == 'dance') {
-            floatY = math.sin(_idleController.value * math.pi * 3) * 12;
-            tilt = math.cos(_idleController.value * math.pi * 3) * 0.15;
-          } else if (widget.mode == 'listen') {
-            tilt = 0.16; // Head tilt matching prototype tilt=0.16
-          } else if (widget.mode == 'talk') {
-            scaleY = 1.0 + math.sin(_idleController.value * math.pi * 4) * 0.08;
-          }
-
-          return Stack(
-            clipBehavior: Clip.none,
-            alignment: Alignment.center,
-            children: [
-              // 3D Pet Character Preview with physical animation transforms
-              Transform.translate(
-                offset: Offset(0, floatY),
-                child: Transform.rotate(
-                  angle: tilt,
-                  child: Transform.scale(
-                    scaleY: scaleY,
-                    child: Container(
-                      width: widget.size,
-                      height: widget.size,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: widget.character.accentColor.withValues(alpha: 0.22),
-                            blurRadius: 28,
-                            offset: const Offset(0, 10),
-                          ),
-                        ],
-                      ),
-                      child: ClipOval(
-                        child: _webController != null && !kIsWeb
-                            ? IgnorePointer(
-                                child: WebViewWidget(controller: _webController!),
-                              )
-                            : Image.asset(
-                                widget.character.previewAsset,
-                                fit: BoxFit.contain,
-                                filterQuality: FilterQuality.high,
-                              ),
-                      ),
+          // "Tap me to talk" Hint pill matching prototype .hint
+          if (widget.showHint && !widget.isCardOpen)
+            Positioned(
+              top: 8,
+              left: widget.size / 2 - 20,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(14),
+                    topRight: Radius.circular(14),
+                    bottomRight: Radius.circular(14),
+                    bottomLeft: Radius.circular(3),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Color(0x33000000), // 0 4px 12px #0003
+                      blurRadius: 12,
+                      offset: Offset(0, 4),
                     ),
+                  ],
+                ),
+                child: Text(
+                  'Tap me to talk',
+                  style: GoogleFonts.fredoka(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.textDark,
                   ),
                 ),
               ),
-
-              // "Tap me to talk" Hint pill matching prototype .hint
-              if (widget.showHint)
-                Positioned(
-                  top: -8,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.only(
-                        topLeft: Radius.circular(14),
-                        topRight: Radius.circular(14),
-                        bottomRight: Radius.circular(14),
-                        bottomLeft: Radius.circular(3),
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Color(0x20000000),
-                          blurRadius: 10,
-                          offset: Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: const Text(
-                      'Tap me to talk',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textDark,
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          );
-        },
+            ),
+        ],
       ),
     );
   }

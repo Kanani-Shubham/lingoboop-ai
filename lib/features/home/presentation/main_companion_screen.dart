@@ -9,7 +9,8 @@ import '../../companion/presentation/lingo_card_widget.dart';
 import '../../settings/presentation/pet_settings_sheet.dart';
 
 class MainCompanionScreen extends ConsumerStatefulWidget {
-  const MainCompanionScreen({super.key});
+  final bool showFloatingPet;
+  const MainCompanionScreen({super.key, this.showFloatingPet = true});
 
   @override
   ConsumerState<MainCompanionScreen> createState() => _MainCompanionScreenState();
@@ -270,8 +271,8 @@ class _MainCompanionScreenState extends ConsumerState<MainCompanionScreen> {
               ],
             ),
 
-            // 2. Settings Sheet Dropdown (#sh)
-            if (companionState.isSettingsOpen)
+            // 2. Settings Sheet Dropdown (#sh) - only if standalone preview
+            if (widget.showFloatingPet && companionState.isSettingsOpen)
               Positioned(
                 top: 60,
                 left: 12,
@@ -279,42 +280,54 @@ class _MainCompanionScreenState extends ConsumerState<MainCompanionScreen> {
                 child: const PetSettingsSheet(),
               ),
 
-            // 3. Floating LingoCard Dialogue (#cd)
-            if (companionState.isCardOpen) ...[
+            if (widget.showFloatingPet) ...[
+              // 3. Floating PolyCard Dialogue (#cd)
+              if (companionState.isCardOpen)
+                Positioned(
+                  bottom: 76,
+                  left: (_petPos.dx + 75 < size.width / 2) ? 108 : null,
+                  right: (_petPos.dx + 75 < size.width / 2) ? null : 108,
+                  child: const LingoCardWidget(),
+                ),
+
+              // 4. Draggable Floating 3D Pet Companion (#pw / #cv)
               Positioned(
-                bottom: 16,
-                left: _petPos.dx + 70 < size.width / 2 ? 110 : 16,
-                right: _petPos.dx + 70 < size.width / 2 ? 16 : null,
-                child: const LingoCardWidget(),
+                left: _petPos.dx,
+                top: _petPos.dy,
+                child: FloatingPetAvatar(
+                  character: companionState.activePet,
+                  mode: companionState.petMode,
+                  showHint: !_hasTappedPet && !companionState.isCardOpen,
+                  isCardOpen: companionState.isCardOpen,
+                  dockSide: (_petPos.dx + 75 < size.width / 2) ? 'r' : 'l',
+                  onTap: () {
+                    setState(() => _hasTappedPet = true);
+                    if (companionState.isCardOpen) {
+                      notifier.closeCard();
+                    } else {
+                      final side = (_petPos.dx + 75 < size.width / 2) ? 'r' : 'l';
+                      final tx = (side == 'r') ? -24.0 : (size.width - 126.0);
+                      setState(() {
+                        _petPos = Offset(tx, _petPos.dy);
+                      });
+                      notifier.openCard();
+                    }
+                  },
+                  onDragUpdate: (delta) {
+                    setState(() {
+                      _petPos = Offset(
+                        (_petPos.dx + delta.dx).clamp(-40.0, size.width - 110.0),
+                        (_petPos.dy + delta.dy).clamp(60.0, maxY),
+                      );
+                    });
+                    notifier.updatePetPosition(_petPos);
+                  },
+                  onDragEnd: () {
+                    notifier.finishPetDrag();
+                  },
+                ),
               ),
             ],
-
-            // 4. Draggable Floating 3D Pet Companion (#pw / #cv)
-            Positioned(
-              left: _petPos.dx,
-              top: _petPos.dy,
-              child: FloatingPetAvatar(
-                character: companionState.activePet,
-                mode: companionState.petMode,
-                showHint: !_hasTappedPet,
-                onTap: () {
-                  setState(() => _hasTappedPet = true);
-                  notifier.toggleCard();
-                },
-                onDragUpdate: (delta) {
-                  setState(() {
-                    _petPos = Offset(
-                      (_petPos.dx + delta.dx).clamp(-10.0, size.width - 130.0),
-                      (_petPos.dy + delta.dy).clamp(60.0, maxY),
-                    );
-                  });
-                  notifier.updatePetPosition(_petPos);
-                },
-                onDragEnd: () {
-                  notifier.finishPetDrag();
-                },
-              ),
-            ),
           ],
         ),
       ),

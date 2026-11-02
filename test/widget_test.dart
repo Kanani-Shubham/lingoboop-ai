@@ -10,7 +10,8 @@ void main() {
         child: LingoBoomApp(),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
 
     // Verify Title and Subtitle exist
     expect(find.text('LingoBoom'), findsOneWidget);

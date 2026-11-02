@@ -78,3 +78,6 @@ env/
 # Node / Scratch temp scripts
 node_modules/
 npm-debug.log*
+
+# Test artifacts and screenshots
+live_*.png

@@ -18,6 +18,8 @@ class FloatingPetService : Service() {
 
         const val ACTION_START = "com.lingoboop.overlay.ACTION_START"
         const val ACTION_STOP = "com.lingoboop.overlay.ACTION_STOP"
+        const val ACTION_SHOW_OVERLAY = "com.lingoboop.overlay.ACTION_SHOW_OVERLAY"
+        const val ACTION_HIDE_OVERLAY = "com.lingoboop.overlay.ACTION_HIDE_OVERLAY"
         const val ACTION_UPDATE_PET = "com.lingoboop.overlay.ACTION_UPDATE_PET"
         const val ACTION_UPDATE_LANGUAGES = "com.lingoboop.overlay.ACTION_UPDATE_LANGUAGES"
 
@@ -47,6 +49,12 @@ class FloatingPetService : Service() {
                 stopSelf()
                 return START_NOT_STICKY
             }
+            ACTION_SHOW_OVERLAY -> {
+                windowManager?.setOverlayVisibility(true)
+            }
+            ACTION_HIDE_OVERLAY -> {
+                windowManager?.setOverlayVisibility(false)
+            }
             ACTION_UPDATE_PET -> {
                 val key = intent?.getStringExtra(EXTRA_PET_KEY) ?: "fox"
                 val name = intent?.getStringExtra(EXTRA_PET_NAME) ?: "Maru"
@@ -73,8 +81,19 @@ class FloatingPetService : Service() {
                 }
 
                 val notification = buildForegroundNotification()
-                startForeground(NOTIFICATION_ID, notification)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        notification,
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                    )
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
                 windowManager?.showPet()
+                if (MainActivity.isAppInForeground) {
+                    windowManager?.setOverlayVisibility(false)
+                }
             }
         }
 
@@ -136,3 +155,4 @@ class FloatingPetService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 }
+

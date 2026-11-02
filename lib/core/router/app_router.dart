@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/auth_service.dart';
 import '../../features/achievements/presentation/achievements_screen.dart';
 import '../../features/auth/presentation/forgot_password_screen.dart';
 import '../../features/auth/presentation/login_screen.dart';
@@ -17,7 +18,23 @@ import '../../features/welcome/presentation/welcome_screen.dart';
 class AppRouter {
   AppRouter._();
 
+  static const Set<String> _protectedRoutes = {
+    '/home',
+    '/profile',
+    '/progress',
+    '/achievements',
+    '/subscription',
+    '/settings',
+    '/history',
+    '/pets',
+  };
+
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
+    // Route Guard: unauthenticated users cannot navigate directly into protected screens
+    if (_protectedRoutes.contains(settings.name) && !AuthService.instance.isAuthenticated) {
+      return MaterialPageRoute(builder: (_) => const LoginScreen());
+    }
+
     switch (settings.name) {
       case '/':
         return MaterialPageRoute(builder: (_) => const WelcomeScreen());

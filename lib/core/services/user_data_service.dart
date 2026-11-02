@@ -81,6 +81,9 @@ class UserDataService {
     String? activeCharacterId,
     double? audioSpeed,
     int? dailyGoalMinutes,
+    bool? overlayEnabled,
+    double? overlayPositionX,
+    double? overlayPositionY,
   }) async {
     final uid = currentUserId;
     final client = _client;
@@ -94,6 +97,9 @@ class UserDataService {
       if (activeCharacterId != null) payload['active_character_id'] = activeCharacterId;
       if (audioSpeed != null) payload['audio_speed'] = audioSpeed;
       if (dailyGoalMinutes != null) payload['daily_goal_minutes'] = dailyGoalMinutes;
+      if (overlayEnabled != null) payload['overlay_enabled'] = overlayEnabled;
+      if (overlayPositionX != null) payload['overlay_position_x'] = overlayPositionX;
+      if (overlayPositionY != null) payload['overlay_position_y'] = overlayPositionY;
 
       await client.from('user_preferences').upsert(payload);
       return true;

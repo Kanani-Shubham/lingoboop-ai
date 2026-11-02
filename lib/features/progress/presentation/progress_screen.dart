@@ -114,14 +114,17 @@ class _ProgressScreenState extends ConsumerState<ProgressScreen> {
                 const SizedBox(height: 16),
 
                 // Filter Chips
-                Row(
-                  children: [
-                    _buildFilterChip('All Words', 'all', companionState.activePet.accentColor),
-                    const SizedBox(width: 8),
-                    _buildFilterChip('Ready to Review', 'due', companionState.activePet.accentColor),
-                    const SizedBox(width: 8),
-                    _buildFilterChip('Mastered', 'mastered', companionState.activePet.accentColor),
-                  ],
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _buildFilterChip('All Words', 'all', companionState.activePet.accentColor),
+                      const SizedBox(width: 8),
+                      _buildFilterChip('Ready to Review', 'due', companionState.activePet.accentColor),
+                      const SizedBox(width: 8),
+                      _buildFilterChip('Mastered', 'mastered', companionState.activePet.accentColor),
+                    ],
+                  ),
                 ),
 
                 const SizedBox(height: 12),

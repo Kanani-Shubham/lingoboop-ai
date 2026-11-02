@@ -17,7 +17,7 @@
   <script>
     const cv = document.getElementById('cv');
     const R = new THREE.WebGLRenderer({ canvas: cv, alpha: true, antialias: true, powerPreference: 'high-performance' });
-    R.setPixelRatio(Math.min(window.devicePixelRatio || 1, 3));
+    R.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     R.setSize(window.innerWidth, window.innerHeight, false);
     R.outputEncoding = THREE.sRGBEncoding;
 
@@ -26,8 +26,8 @@
     C.position.set(0, 1.3, 4.6);
     C.lookAt(0, 0.62, 0);
 
-    S.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.0));
-    const D = new THREE.DirectionalLight(0xffffff, 0.85);
+    S.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 0.95));
+    const D = new THREE.DirectionalLight(0xffffff, 0.8);
     D.position.set(2, 4, 3);
     S.add(D);
 
@@ -47,7 +47,13 @@
       oops: 'gesture-negative',
       cheer: 'dance'
     };
+    
     let currentMode = 'idle';
+    let face = 0.5;
+    let tilt = 0;
+    let pulse = 0;
+    let isCardOpen = false;
+    let dockSide = 'r';
 
     function play(n) {
       const a = acts[n] || acts.idle;
@@ -57,8 +63,10 @@
       curA = a;
     }
 
-    function setMode(m) {
+    function applyMode(m) {
       currentMode = m;
+      tilt = (m === 'listen') ? 0.16 : 0;
+      if (m === 'talk') pulse = 1.0;
       if (acts && acts[A[m] || 'idle']) {
         play(A[m] || 'idle');
       }
@@ -73,21 +81,40 @@
         GL.parse(buf.buffer, '', (g) => {
           if (model) H.remove(model);
           model = g.scene;
+          model.traverse((o) => { o.frustumCulled = false; });
+          
+          // Exact prototype bounding box scaling and centering
+          const b = new THREE.Box3().setFromObject(model);
+          const z = b.getSize(new THREE.Vector3());
+          const c = b.getCenter(new THREE.Vector3());
+          const s = 1.25 / Math.max(z.x, z.y, z.z);
+          model.scale.setScalar(s);
+          model.position.set(-c.x * s, -b.min.y * s, -c.z * s);
+          
           H.add(model);
           mix = new THREE.AnimationMixer(model);
           acts = {};
           g.animations.forEach((a) => {
             acts[a.name] = mix.clipAction(a);
           });
+          curA = null;
           play(A[currentMode] || 'idle');
+        }, (err) => {
+          console.error('Error parsing GLTF pet model:', err);
         });
       } catch (e) {
-        console.error('Error parsing GLTF pet model:', e);
+        console.error('Error loading pet model:', e);
       }
     }
 
     window.setPet = function(k) { loadPet(k); };
-    window.setMode = function(m) { setMode(m); };
+    window.setMode = function(m) { applyMode(m); };
+    window.setFacing = function(dir) { face = dir; };
+    window.setCardDock = function(open, side) {
+      isCardOpen = !!open;
+      dockSide = side || 'r';
+    };
+    window.triggerPulse = function() { pulse = 1.0; };
 
     // Initial pet load
     loadPet('fox');
@@ -98,17 +125,23 @@
       C.updateProjectionMatrix();
     });
 
-    let lastT = performance.now();
+    const clk = new THREE.Clock();
     function tick() {
       requestAnimationFrame(tick);
-      const now = performance.now();
-      const dt = (now - lastT) * 0.001;
-      lastT = now;
+      const dt = Math.min(clk.getDelta(), 0.1);
       if (mix) mix.update(dt);
+
+      if (currentMode !== 'walk') {
+        face = isCardOpen ? (dockSide === 'r' ? 0.9 : -0.9) : 0.5;
+      }
+      H.rotation.y += (face - H.rotation.y) * Math.min(1, dt * 8);
+      H.rotation.z += (tilt - H.rotation.z) * Math.min(1, dt * 6);
+      pulse *= Math.exp(-dt * 8);
+      H.scale.set(1 - 0.05 * pulse, 1 + 0.12 * pulse, 1 - 0.05 * pulse);
+
       R.render(S, C);
     }
     requestAnimationFrame(tick);
   </script>
 </body>
 </html>
-
