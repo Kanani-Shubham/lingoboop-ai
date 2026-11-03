@@ -13,9 +13,75 @@ _MAX_CACHE_SIZE = 128
 _SHARED_CLIENT: Optional[httpx.AsyncClient] = None
 
 
+def normalize_pcm_16bit(pcm_bytes: bytes, target_peak_dbfs: float = -1.0, target_rms_dbfs: float = -15.0) -> bytes:
+    """
+    Safely normalizes 16-bit linear PCM audio for high-clarity speech playback on mobile devices.
+    Applies calculated gain targeting ~ -15.0 dBFS RMS with a -1.0 dBFS ceiling and smooth soft-knee limiter.
+    Guarantees zero clipping and avoids excessive floor noise amplification.
+    """
+    import math
+    import struct
+
+    num_samples = len(pcm_bytes) // 2
+    if num_samples == 0:
+        return pcm_bytes
+
+    try:
+        samples = list(struct.unpack(f"<{num_samples}h", pcm_bytes))
+    except Exception:
+        return pcm_bytes
+
+    peak = max(abs(s) for s in samples)
+    if peak == 0:
+        return pcm_bytes
+
+    peak_dbfs = 20 * math.log10(peak / 32768.0)
+    sum_sq = sum(float(s) * float(s) for s in samples)
+    rms = math.sqrt(sum_sq / num_samples)
+    rms_dbfs = 20 * math.log10(rms / 32768.0) if rms > 0 else -999.0
+
+    # Guard: if already loud enough (peak >= -1.5 dBFS or RMS >= -17 dBFS), avoid double-normalizing
+    if peak_dbfs >= -1.5 or rms_dbfs >= -17.0:
+        return pcm_bytes
+
+    target_rms_amp = 32768.0 * (10 ** (target_rms_dbfs / 20.0))  # ~ 5836 for -15 dBFS
+    target_peak_amp = 32768.0 * (10 ** (target_peak_dbfs / 20.0))  # ~ 29205 for -1.0 dBFS
+
+    desired_rms_gain = (target_rms_amp / rms) if rms > 0 else 1.0
+    max_linear_gain = target_peak_amp / peak
+    gain = min(desired_rms_gain, max_linear_gain * 1.5)
+    gain = max(1.0, min(gain, 3.5))  # Safe gain cap between 1.0x and 3.5x (+10.8 dB)
+
+    threshold = 26000.0  # ~ -2.0 dBFS
+    ceiling = 31000.0    # ~ -0.48 dBFS
+    ratio = ceiling - threshold
+
+    out_samples = []
+    for s in samples:
+        val = s * gain
+        abs_val = abs(val)
+        if abs_val <= threshold:
+            out_val = val
+        else:
+            over = abs_val - threshold
+            compressed_over = ratio * math.tanh(over / ratio)
+            limited = threshold + compressed_over
+            out_val = math.copysign(limited, val)
+
+        int_val = int(round(out_val))
+        if int_val > 32767:
+            int_val = 32767
+        elif int_val < -32768:
+            int_val = -32768
+        out_samples.append(int_val)
+
+    return struct.pack(f"<{num_samples}h", *out_samples)
+
+
 def _wrap_pcm_as_wav(pcm_bytes: bytes, sample_rate: int = 16000, num_channels: int = 1, bits_per_sample: int = 16) -> bytes:
     """Wraps raw linear PCM audio bytes into a standard 44-byte WAV (RIFF/WAVE) container,
-    and repairs Gnani's 0xFFFFFFFF streaming placeholder size fields so Android/ExoPlayer can decode and play the audio."""
+    repairs Gnani's 0xFFFFFFFF streaming placeholder size fields, and normalizes audio loudness
+    so speech sounds loud, balanced, and clear on physical mobile device speakers."""
     import struct
     if pcm_bytes.startswith(b"RIFF"):
         if len(pcm_bytes) >= 44:
@@ -25,16 +91,23 @@ def _wrap_pcm_as_wav(pcm_bytes: bytes, sample_rate: int = 16000, num_channels: i
                 actual_riff_size = len(pcm_bytes) - 8
                 existing_riff_size = struct.unpack("<I", pcm_bytes[4:8])[0]
                 existing_data_size = struct.unpack("<I", pcm_bytes[data_idx+4:data_idx+8])[0]
+
+                # Extract and normalize the PCM data
+                raw_pcm = pcm_bytes[data_idx + 8 : data_idx + 8 + actual_data_size]
+                normalized_pcm = normalize_pcm_16bit(raw_pcm)
+
+                ba = bytearray(pcm_bytes[:data_idx + 8])
                 if existing_riff_size in (0, 0xFFFFFFFF) or existing_data_size in (0, 0xFFFFFFFF) or existing_data_size > len(pcm_bytes):
-                    ba = bytearray(pcm_bytes)
                     struct.pack_into("<I", ba, 4, actual_riff_size)
                     struct.pack_into("<I", ba, data_idx + 4, actual_data_size)
-                    return bytes(ba)
+                return bytes(ba) + normalized_pcm
         return pcm_bytes
 
+    # If raw PCM was provided without RIFF header:
+    normalized_pcm = normalize_pcm_16bit(pcm_bytes)
     byte_rate = sample_rate * num_channels * (bits_per_sample // 8)
     block_align = num_channels * (bits_per_sample // 8)
-    data_size = len(pcm_bytes)
+    data_size = len(normalized_pcm)
     riff_size = 36 + data_size
 
     header = bytearray()

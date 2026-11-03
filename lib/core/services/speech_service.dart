@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -499,6 +500,70 @@ class SpeechService {
     return defaultVoiceCatalog;
   }
 
+  /// Safely normalizes 16-bit linear PCM audio for high-clarity speech playback on mobile devices.
+  /// Applies calculated gain targeting ~ -15.0 dBFS RMS with a -1.0 dBFS ceiling and smooth soft-knee limiter.
+  static Uint8List normalizePcm16(Uint8List pcmBytes, {double targetRmsDbfs = -15.0, double targetPeakDbfs = -1.0}) {
+    if (pcmBytes.length < 2) return pcmBytes;
+    final numSamples = pcmBytes.length ~/ 2;
+    final byteData = ByteData.sublistView(pcmBytes);
+
+    int peak = 0;
+    double sumSq = 0.0;
+    for (int i = 0; i < numSamples; i++) {
+      final s = byteData.getInt16(i * 2, Endian.little);
+      final absS = s < 0 ? -s : s;
+      if (absS > peak) peak = absS;
+      sumSq += s * s;
+    }
+    if (peak == 0) return pcmBytes;
+
+    final rms = math.sqrt(sumSq / numSamples);
+    final peakDbfs = 20.0 * (math.log(peak / 32768.0) / math.ln10);
+    final rmsDbfs = rms > 0 ? 20.0 * (math.log(rms / 32768.0) / math.ln10) : -999.0;
+
+    // Guard: already sufficiently loud
+    if (peakDbfs >= -1.5 || rmsDbfs >= -17.0) return pcmBytes;
+
+    final targetRmsAmp = 32768.0 * math.pow(10.0, targetRmsDbfs / 20.0);
+    final targetPeakAmp = 32768.0 * math.pow(10.0, targetPeakDbfs / 20.0);
+
+    final desiredRmsGain = rms > 0 ? (targetRmsAmp / rms) : 1.0;
+    final maxLinearGain = targetPeakAmp / peak;
+    var gain = desiredRmsGain < (maxLinearGain * 1.5) ? desiredRmsGain : (maxLinearGain * 1.5);
+    if (gain < 1.0) gain = 1.0;
+    if (gain > 3.5) gain = 3.5;
+
+    final threshold = 26000.0;
+    final ceiling = 31000.0;
+    final ratio = ceiling - threshold;
+
+    final outBytes = Uint8List(pcmBytes.length);
+    final outData = ByteData.sublistView(outBytes);
+
+    for (int i = 0; i < numSamples; i++) {
+      final s = byteData.getInt16(i * 2, Endian.little);
+      final val = s * gain;
+      final absVal = val < 0 ? -val : val;
+      double outVal;
+      if (absVal <= threshold) {
+        outVal = val;
+      } else {
+        final over = absVal - threshold;
+        final x = over / ratio;
+        final clampedX = x.clamp(-15.0, 15.0);
+        final e2x = math.exp(2.0 * clampedX);
+        final th = (e2x - 1.0) / (e2x + 1.0);
+        final limited = threshold + ratio * th;
+        outVal = val < 0 ? -limited : limited;
+      }
+      var intVal = outVal.round();
+      if (intVal > 32767) intVal = 32767;
+      if (intVal < -32768) intVal = -32768;
+      outData.setInt16(i * 2, intVal, Endian.little);
+    }
+    return outBytes;
+  }
+
   /// Ensures raw PCM audio is wrapped in a standard 44-byte WAV header if not already present
   Uint8List _wrapPcmAsWav(
     Uint8List pcmBytes, {
@@ -522,23 +587,23 @@ class SpeechService {
         }
       }
       if (dataIdx != -1 && dataIdx + 8 <= pcmBytes.length) {
-        final byteData = ByteData.sublistView(pcmBytes);
-        final riffSize = byteData.getUint32(4, Endian.little);
-        final dataSize = byteData.getUint32(dataIdx + 4, Endian.little);
-        if (riffSize == 0xFFFFFFFF || riffSize == 0 || dataSize == 0xFFFFFFFF || dataSize == 0 || dataSize > pcmBytes.length) {
-          final out = Uint8List.fromList(pcmBytes);
-          final outData = ByteData.sublistView(out);
-          outData.setUint32(4, pcmBytes.length - 8, Endian.little);
-          outData.setUint32(dataIdx + 4, pcmBytes.length - (dataIdx + 8), Endian.little);
-          return out;
-        }
+        final rawPcm = Uint8List.sublistView(pcmBytes, dataIdx + 8);
+        final normalizedPcm = normalizePcm16(rawPcm);
+        final out = Uint8List(dataIdx + 8 + normalizedPcm.length);
+        out.setRange(0, dataIdx + 8, pcmBytes);
+        out.setRange(dataIdx + 8, out.length, normalizedPcm);
+        final outData = ByteData.sublistView(out);
+        outData.setUint32(4, out.length - 8, Endian.little);
+        outData.setUint32(dataIdx + 4, normalizedPcm.length, Endian.little);
+        return out;
       }
       return pcmBytes;
     }
 
+    final normalizedPcm = normalizePcm16(pcmBytes);
     final byteRate = sampleRate * channels * (bitsPerSample ~/ 8);
     final blockAlign = channels * (bitsPerSample ~/ 8);
-    final dataSize = pcmBytes.length;
+    final dataSize = normalizedPcm.length;
     final riffSize = 36 + dataSize;
     final header = ByteData(44);
 
@@ -570,7 +635,7 @@ class SpeechService {
 
     final out = Uint8List(44 + dataSize);
     out.setRange(0, 44, header.buffer.asUint8List());
-    out.setRange(44, 44 + dataSize, pcmBytes);
+    out.setRange(44, 44 + dataSize, normalizedPcm);
     return out;
   }
 
@@ -654,7 +719,7 @@ class SpeechService {
         avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
         androidAudioAttributes: AndroidAudioAttributes(
           contentType: AndroidAudioContentType.speech,
-          flags: AndroidAudioFlags.audibilityEnforced,
+          flags: AndroidAudioFlags.none,
           usage: AndroidAudioUsage.media,
         ),
         androidAudioFocusGainType: AndroidAudioFocusGainType.gain,

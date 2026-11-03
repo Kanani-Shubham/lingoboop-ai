@@ -14,3 +14,4 @@
         <domain includeSubdomains="true">10.94.94.80</domain>
     </domain-config>
 </network-security-config>
+

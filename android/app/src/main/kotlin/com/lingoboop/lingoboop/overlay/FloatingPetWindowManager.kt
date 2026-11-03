@@ -217,7 +217,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
         this.targetLanguage = targetLang
         this.spokenText = originalText
         this.translatedText = translatedText
-        this.correctionTip = if (!correction.isNullOrBlank()) correction else null
+        this.correctionTip = if (!correction.isNullOrBlank() && correction != "null") correction else null
         this.statusNote = statusNote ?: if (translatedText.isNotEmpty()) "Tap Repeat to test your pronunciation!" else "Tap the mic and speak."
         this.lastRequestId = requestId
 
@@ -238,7 +238,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
             updatePanelTheme()
             tvSpoken?.text = this.spokenText.ifEmpty { "Tap mic to speak or enter text below." }
             tvTranslated?.text = this.translatedText.ifEmpty { "Welcome to LingoBoop!" }
-            if (this.correctionTip != null) {
+            if (this.correctionTip != null && this.correctionTip != "null") {
                 tvCorrection?.visibility = View.VISIBLE
                 tvCorrection?.text = "💡 ${this.correctionTip}"
             } else {
@@ -810,7 +810,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
 
         // 4. Grammar / AI Correction Tip (dark pill container)
         val correction = TextView(context).apply {
-            text = if (!correctionTip.isNullOrBlank()) "💡 $correctionTip" else ""
+            text = if (!correctionTip.isNullOrBlank() && correctionTip != "null") "💡 $correctionTip" else ""
             setTextColor(Color.WHITE)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             val corrBg = GradientDrawable().apply {
@@ -819,7 +819,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
             }
             background = corrBg
             setPadding(dpToPx(8), dpToPx(4), dpToPx(8), dpToPx(4))
-            visibility = if (!correctionTip.isNullOrBlank()) View.VISIBLE else View.GONE
+            visibility = if (!correctionTip.isNullOrBlank() && correctionTip != "null") View.VISIBLE else View.GONE
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -1139,12 +1139,12 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                 if (finalTranslation != null) {
                     spokenText = inputText
                     translatedText = finalTranslation
-                    correctionTip = if (!finalCorrection.isNullOrBlank()) finalCorrection else null
+                    correctionTip = if (!finalCorrection.isNullOrBlank() && finalCorrection != "null") finalCorrection else null
                     statusNote = "Tap Repeat to test your pronunciation!"
 
                     tvSpoken?.text = spokenText
                     tvTranslated?.text = translatedText
-                    if (correctionTip != null) {
+                    if (correctionTip != null && correctionTip != "null") {
                         tvCorrection?.visibility = View.VISIBLE
                         tvCorrection?.text = "💡 $correctionTip"
                     } else {
@@ -1271,25 +1271,84 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
         ) {
             return pcmBytes
         }
-        val copy = pcmBytes.copyOf()
         var dataIdx = -1
-        for (i in 12 until copy.size - 8) {
-            if (copy[i] == 'd'.code.toByte() && copy[i + 1] == 'a'.code.toByte() &&
-                copy[i + 2] == 't'.code.toByte() && copy[i + 3] == 'a'.code.toByte()
+        for (i in 12 until pcmBytes.size - 8) {
+            if (pcmBytes[i] == 'd'.code.toByte() && pcmBytes[i + 1] == 'a'.code.toByte() &&
+                pcmBytes[i + 2] == 't'.code.toByte() && pcmBytes[i + 3] == 'a'.code.toByte()
             ) {
                 dataIdx = i
                 break
             }
         }
-        if (dataIdx != -1) {
-            val actualDataSize = copy.size - (dataIdx + 8)
-            val actualRiffSize = copy.size - 8
-            ByteBuffer.wrap(copy).order(ByteOrder.LITTLE_ENDIAN).apply {
-                putInt(4, actualRiffSize)
-                putInt(dataIdx + 4, actualDataSize)
-            }
+        if (dataIdx == -1) return pcmBytes
+
+        val pcmStart = dataIdx + 8
+        val rawPcmLen = pcmBytes.size - pcmStart
+        val numSamples = rawPcmLen / 2
+        if (numSamples <= 0) return pcmBytes
+
+        val byteBuf = ByteBuffer.wrap(pcmBytes).order(ByteOrder.LITTLE_ENDIAN)
+        var peak = 0
+        var sumSq = 0.0
+        val samples = ShortArray(numSamples)
+        for (i in 0 until numSamples) {
+            val s = byteBuf.getShort(pcmStart + i * 2).toInt()
+            samples[i] = s.toShort()
+            val absS = kotlin.math.abs(s)
+            if (absS > peak) peak = absS
+            sumSq += s.toDouble() * s.toDouble()
         }
-        return copy
+        if (peak == 0) return pcmBytes
+
+        val rms = kotlin.math.sqrt(sumSq / numSamples)
+        val peakDbfs = 20.0 * kotlin.math.log10(peak / 32768.0)
+        val rmsDbfs = if (rms > 0) 20.0 * kotlin.math.log10(rms / 32768.0) else -999.0
+
+        if (peakDbfs >= -1.5 || rmsDbfs >= -17.0) {
+            val copy = pcmBytes.copyOf()
+            ByteBuffer.wrap(copy).order(ByteOrder.LITTLE_ENDIAN).apply {
+                putInt(4, copy.size - 8)
+                putInt(dataIdx + 4, rawPcmLen)
+            }
+            return copy
+        }
+
+        val targetRmsAmp = 32768.0 * Math.pow(10.0, -15.0 / 20.0)
+        val targetPeakAmp = 32768.0 * Math.pow(10.0, -1.0 / 20.0)
+
+        val desiredRmsGain = if (rms > 0) targetRmsAmp / rms else 1.0
+        val maxLinearGain = targetPeakAmp / peak
+        var gain = kotlin.math.min(desiredRmsGain, maxLinearGain * 1.5)
+        gain = kotlin.math.max(1.0, kotlin.math.min(gain, 3.5))
+
+        val threshold = 26000.0
+        val ceiling = 31000.0
+        val ratio = ceiling - threshold
+
+        val outBytes = ByteArray(pcmStart + numSamples * 2)
+        System.arraycopy(pcmBytes, 0, outBytes, 0, pcmStart)
+        val outBuf = ByteBuffer.wrap(outBytes).order(ByteOrder.LITTLE_ENDIAN)
+
+        outBuf.putInt(4, outBytes.size - 8)
+        outBuf.putInt(dataIdx + 4, numSamples * 2)
+
+        for (i in 0 until numSamples) {
+            val s = samples[i].toDouble()
+            val v = s * gain
+            val absV = kotlin.math.abs(v)
+            val outVal = if (absV <= threshold) {
+                v
+            } else {
+                val over = absV - threshold
+                val limited = threshold + ratio * kotlin.math.tanh(over / ratio)
+                if (v < 0) -limited else limited
+            }
+            var intVal = kotlin.math.round(outVal).toInt()
+            if (intVal > 32767) intVal = 32767
+            if (intVal < -32768) intVal = -32768
+            outBuf.putShort(pcmStart + i * 2, intVal.toShort())
+        }
+        return outBytes
     }
 
     private fun playAudioFile(file: File, rate: Float) {
@@ -1305,6 +1364,13 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                 setVolume(1.0f, 1.0f)
                 setDataSource(file.absolutePath)
                 prepare()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && rate != 1.0f) {
+                    try {
+                        playbackParams = playbackParams.setSpeed(rate)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Could not set playback speed: ${e.message}")
+                    }
+                }
                 start()
                 setOnCompletionListener {
                     release()

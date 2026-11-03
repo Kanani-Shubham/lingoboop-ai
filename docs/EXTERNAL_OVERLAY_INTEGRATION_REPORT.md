@@ -163,3 +163,4 @@ Once the Android device (`10BCBF23HT000H7`) is reconnected via USB:
    - **Scenario B (Voice Sync):** Change voice to `Devansh` in Settings $\rightarrow$ tap Play outside the app $\rightarrow$ verify Devansh speaks. Change voice to `Shubham` $\rightarrow$ verify outside card immediately speaks with Shubham without restart.
    - **Scenario C (Repeat Pronunciation):** Open floating card $\rightarrow$ tap Repeat $\rightarrow$ speak English translation $\rightarrow$ verify score and feedback display.
    - **Scenario D (Typed Input):** Type Gujarati sentence in outside card $\rightarrow$ tap `↑` $\rightarrow$ verify English translation is generated and spoken aloud.
+
