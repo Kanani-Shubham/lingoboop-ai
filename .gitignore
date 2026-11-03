@@ -81,3 +81,5 @@ npm-debug.log*
 
 # Test artifacts and screenshots
 live_*.png
+current_device_screen.png
+i_need_img'/
