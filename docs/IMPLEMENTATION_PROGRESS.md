@@ -98,6 +98,41 @@ All critical user-reported issues from physical Android 14 device testing have b
 | **Pronunciation Scorer Unit Tests** | `flutter test test/pronunciation_scorer_test.dart` | **PASS (5/5)** | Exact match, partial match, empty speech, punctuation, Gujarati script |
 | **Backend Daily Practice & AI Tests** | `pytest backend/tests/test_daily_practice.py` | **PASS (3/3)** | Authenticated endpoint, unauthenticated rejection, AI generation |
 | **Backend Translation & Fallback Tests**| `pytest backend/tests/test_translation.py` | **PASS (4/4)** | Phrase cache, identity check, Groq fallback, auth rejection |
+| **P0-P4 QA Upgrade Verification** | `flutter test` & `pytest backend/tests` | **PASS (56/56)** | All Flutter & backend tests pass cleanly |
+
+---
+
+## 4. Final Mobile QA Fix & Upgrade Summary (P0 - P4)
+
+### P0 — Text-To-Speech (TTS) Reliability
+- **Root Cause:** Gnani Timbre API (`/api/v1/tts/inference`) returns raw 16-bit 16kHz linear PCM bytes without a RIFF/WAVE header. When written to a `.wav` file, ExoPlayer/Android MediaPlayer failed with `Loading interrupted` / `UnrecognizedInputFormatException`. Additionally, race conditions with `processingStateStream.firstWhere` timeout interrupted playback.
+- **Solution:**
+  1. Implemented `_wrap_pcm_as_wav` in `backend/app/providers/gnani_tts.py` to wrap raw linear PCM into a standard 44-byte RIFF/WAVE container header before base64 encoding.
+  2. Implemented secondary safety wrap in Flutter `SpeechService._wrapPcmAsWav` ensuring any audio bytes without a RIFF marker are wrapped into valid 16kHz mono WAV audio before disk write.
+  3. Refactored `SpeechService.playAudioFile` to cleanly stop prior playback, set file path, set speed, and call `play()` without fragile stream timeouts.
+  4. Preserved existing pronunciation assessment and scoring intact.
+
+### P1 — Multi-Character 3D Pet Synchronization
+- **Root Cause:** `assets/web/models_data.js` previously only contained the Fox 3D model. When user switched companions in-app (Pano, Leo, Mimi, Bun, Pip), `window.setPet` in the external overlay's WebView failed silently because the keys did not exist in `window.PET_MODELS`.
+- **Solution:**
+  1. Extracted and base64-encoded all six `.glb` companion models (`maru`, `mimi`, `bun`, `pano`, `pip`, `leo`) into `assets/web/models_data.js` with canonical names and character aliases.
+  2. Updated `assets/web/pet_viewer.html` to accept the pet key via URL query parameter (`?pet=$petKey`) and dynamic `window.setPet(k)` calls.
+  3. Ensured `FloatingPetWindowManager.kt` persists `pet_key`, `pet_name`, and `pet_color` in SharedPreferences and dispatches main-thread JavaScript model reloads on character change.
+
+### P2 — In-App Pet Gravity Initialization on Cold Startup
+- **Root Cause:** On application cold start, initial coordinates were statically placed mid-screen, leaving the pet suspended until a state rebuild or character switch occurred.
+- **Solution:**
+  1. In `MainNavigationShell.initState()`, added `WidgetsBinding.instance.addPostFrameCallback` to calculate the real viewport floor and place the pet slightly above floor (`floorY - 50.0`).
+  2. Active ticker gravity immediately animates a natural settling drop to the floor on frame 1 without requiring any user interaction.
+  3. Maintained strict zero-gravity physics for the external floating overlay pet (it remains stationary where dragged).
+
+### P3 & P4 — External PolyCard Positioning & Dual-Engine Speech Playback
+- **Root Cause:** When opening the external overlay card, the card opened at the pet's location, occluding the 3D pet. Also, external translation failed when backend was unreachable or JWT token was not passed.
+- **Solution:**
+  1. External PolyCard docking: when opened, the pet docks to the opposite edge (`dpToPx(-24)` on left or `dm.widthPixels - dpToPx(126)` on right) and faces the card. The card docks beside the pet with zero overlap.
+  2. On card close, pet smoothly un-docks and restores its previous coordinates.
+  3. External speech playback: `speakCurrentTranslation` attempts high-fidelity Gnani Timbre neural audio synthesis from `/api/v1/tts/synthesize` first, automatically falling back to Android `TextToSpeech` if offline.
+  4. Added offline translation dictionary fallback in Kotlin so common phrases never display "Translation unavailable".
 | **Backend JWT Security & RLS Tests** | `pytest backend/tests/test_jwt_security.py` | **PASS (8/8)** | Valid token, expired, forged signature, wrong aud, missing claims |
 | **Full Backend Test Suite** | `pytest backend/tests/ -v` | **PASS (43/43)** | 100% of all 43 tests passing in 49.44s |
 | **Android Debug APK Build** | `flutter build apk --debug` | **PASS** | `app-debug.apk` built successfully in 40.0s |

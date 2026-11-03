@@ -116,8 +116,10 @@
     };
     window.triggerPulse = function() { pulse = 1.0; };
 
-    // Initial pet load
-    loadPet('fox');
+    // Initial pet load from URL parameter or default fox
+    const urlParams = new URLSearchParams(window.location.search);
+    const initialPet = urlParams.get('pet') || 'fox';
+    loadPet(initialPet);
 
     window.addEventListener('resize', () => {
       R.setSize(window.innerWidth, window.innerHeight, false);

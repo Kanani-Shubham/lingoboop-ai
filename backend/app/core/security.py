@@ -111,8 +111,18 @@ def decode_supabase_token(token: str) -> Dict[str, Any]:
     )
 
 
+_REMOTE_TOKEN_CACHE: Dict[str, tuple[float, Dict[str, Any]]] = {}
+_CACHE_TTL_SECONDS = 120.0
+
+
 def _verify_with_supabase_remote(token: str) -> Dict[str, Any]:
-    """Fallback remote verification against Supabase Auth /auth/v1/user."""
+    """Fallback remote verification against Supabase Auth /auth/v1/user with short TTL caching."""
+    now = datetime.now(timezone.utc).timestamp()
+    if token in _REMOTE_TOKEN_CACHE:
+        cached_time, cached_payload = _REMOTE_TOKEN_CACHE[token]
+        if now - cached_time < _CACHE_TTL_SECONDS:
+            return cached_payload
+
     url = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/user"
     headers = {
         "Authorization": f"Bearer {token}",
@@ -129,12 +139,14 @@ def _verify_with_supabase_remote(token: str) -> Dict[str, Any]:
                         status_code=status.HTTP_401_UNAUTHORIZED,
                         detail={"error_code": "INVALID_TOKEN", "message": "User ID missing from auth response."}
                     )
-                return {
+                payload = {
                     "sub": user_id,
                     "aud": "authenticated",
                     "email": user_json.get("email"),
                     "role": user_json.get("role", "authenticated")
                 }
+                _REMOTE_TOKEN_CACHE[token] = (now, payload)
+                return payload
             elif resp.status_code in (401, 403):
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,

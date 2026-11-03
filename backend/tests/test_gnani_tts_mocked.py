@@ -47,7 +47,7 @@ async def test_tts_synthesize_raw_binary_mocked():
 async def test_tts_synthesize_json_response_mocked():
     provider = GnaniTTSProvider(api_key="mock_key_tts")
 
-    sample_b64 = base64.b64encode(b"synthesized_audio_data").decode("utf-8")
+    sample_b64 = base64.b64encode(b"RIFF____WAVEfmt " + b"synthesized_audio_data").decode("utf-8")
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.headers = {"content-type": "application/json"}

@@ -363,21 +363,69 @@ class SpeechService {
         if (decoded['success'] == true && decoded['data'] != null) {
           final audioB64 = decoded['data']['audio_base64'] as String?;
           if (audioB64 != null && audioB64.isNotEmpty) {
-            final audioBytes = base64Decode(audioB64);
-            final paddedBytes = _prependSilenceToWav(Uint8List.fromList(audioBytes), silenceMs: 120);
+            final rawBytes = Uint8List.fromList(base64Decode(audioB64));
+            final wavBytes = _wrapPcmAsWav(rawBytes, sampleRate: 16000, channels: 1, bitsPerSample: 16);
+            final paddedBytes = _prependSilenceToWav(wavBytes, silenceMs: 120);
             final tempDir = await getTemporaryDirectory();
             final filePath = '${tempDir.path}/lingo_tts_${DateTime.now().millisecondsSinceEpoch}.wav';
             final ttsFile = File(filePath);
             await ttsFile.writeAsBytes(paddedBytes);
-            debugPrint('[SpeechService] TTS synthesized saved to $filePath (120ms DAC lead-in silence applied)');
+            debugPrint('[SpeechService] TTS synthesized saved to $filePath (${paddedBytes.length} bytes)');
             return filePath;
           }
         }
       }
-    } catch (_) {
-      // Backend not running or timeout
+    } catch (e) {
+      debugPrint('[SpeechService] TTS synthesis exception: $e');
     }
     return null;
+  }
+
+  /// Ensures raw PCM audio is wrapped in a standard 44-byte WAV header if not already present
+  Uint8List _wrapPcmAsWav(Uint8List pcmBytes, {int sampleRate = 16000, int channels = 1, int bitsPerSample = 16}) {
+    if (pcmBytes.length >= 4 &&
+        pcmBytes[0] == 0x52 &&
+        pcmBytes[1] == 0x49 &&
+        pcmBytes[2] == 0x46 &&
+        pcmBytes[3] == 0x46) {
+      return pcmBytes;
+    }
+    final byteRate = sampleRate * channels * (bitsPerSample ~/ 8);
+    final blockAlign = channels * (bitsPerSample ~/ 8);
+    final dataSize = pcmBytes.length;
+    final riffSize = 36 + dataSize;
+    final header = ByteData(44);
+
+    header.setUint8(0, 0x52); // R
+    header.setUint8(1, 0x49); // I
+    header.setUint8(2, 0x46); // F
+    header.setUint8(3, 0x46); // F
+    header.setUint32(4, riffSize, Endian.little);
+    header.setUint8(8, 0x57);  // W
+    header.setUint8(9, 0x41);  // A
+    header.setUint8(10, 0x56); // V
+    header.setUint8(11, 0x45); // E
+    header.setUint8(12, 0x66); // f
+    header.setUint8(13, 0x6d); // m
+    header.setUint8(14, 0x74); // t
+    header.setUint8(15, 0x20); // ' '
+    header.setUint32(16, 16, Endian.little); // Subchunk1Size (16 for PCM)
+    header.setUint16(20, 1, Endian.little);  // AudioFormat (1 for PCM)
+    header.setUint16(22, channels, Endian.little);
+    header.setUint32(24, sampleRate, Endian.little);
+    header.setUint32(28, byteRate, Endian.little);
+    header.setUint16(32, blockAlign, Endian.little);
+    header.setUint16(34, bitsPerSample, Endian.little);
+    header.setUint8(36, 0x64); // d
+    header.setUint8(37, 0x61); // a
+    header.setUint8(38, 0x74); // t
+    header.setUint8(39, 0x61); // a
+    header.setUint32(40, dataSize, Endian.little);
+
+    final out = Uint8List(44 + dataSize);
+    out.setRange(0, 44, header.buffer.asUint8List());
+    out.setRange(44, 44 + dataSize, pcmBytes);
+    return out;
   }
 
   /// Prepends safe lead-in silence to WAV PCM data to prevent hardware audio DAC ramp-up from cutting off the first word
@@ -427,18 +475,14 @@ class SpeechService {
     return newBytes;
   }
 
-  /// Play audio file with specific playback rate (e.g. 1.0 normal or 0.7 slow) with buffering check
+  /// Play audio file with specific playback rate (e.g. 1.0 normal or 0.75 slow)
   Future<void> playAudioFile(String filePath, {double speed = 1.0}) async {
     try {
-      await player.stop();
+      if (player.playing) {
+        await player.stop();
+      }
       await player.setFilePath(filePath);
       await player.setSpeed(speed);
-      if (player.processingState != ProcessingState.ready &&
-          player.processingState != ProcessingState.buffering) {
-        await player.processingStateStream
-            .firstWhere((s) => s == ProcessingState.ready)
-            .timeout(const Duration(milliseconds: 300), onTimeout: () => ProcessingState.ready);
-      }
       await player.play();
     } catch (e) {
       debugPrint('[SpeechService] Audio playback error: $e');

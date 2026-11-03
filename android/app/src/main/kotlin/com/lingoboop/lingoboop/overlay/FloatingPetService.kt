@@ -101,6 +101,9 @@ class FloatingPetService : Service() {
                     startForeground(NOTIFICATION_ID, notification)
                 }
                 windowManager?.showPet()
+                if (key != null && name != null && color != null) {
+                    windowManager?.updatePet(key, name, color)
+                }
                 if (MainActivity.isAppInForeground) {
                     windowManager?.setOverlayVisibility(false)
                 }

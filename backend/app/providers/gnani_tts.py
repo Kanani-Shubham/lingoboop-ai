@@ -13,6 +13,33 @@ _MAX_CACHE_SIZE = 128
 _SHARED_CLIENT: Optional[httpx.AsyncClient] = None
 
 
+def _wrap_pcm_as_wav(pcm_bytes: bytes, sample_rate: int = 16000, num_channels: int = 1, bits_per_sample: int = 16) -> bytes:
+    """Wraps raw linear PCM audio bytes into a standard 44-byte WAV (RIFF/WAVE) container."""
+    if pcm_bytes.startswith(b"RIFF"):
+        return pcm_bytes
+    import struct
+    byte_rate = sample_rate * num_channels * (bits_per_sample // 8)
+    block_align = num_channels * (bits_per_sample // 8)
+    data_size = len(pcm_bytes)
+    riff_size = 36 + data_size
+
+    header = bytearray()
+    header.extend(b"RIFF")
+    header.extend(struct.pack("<I", riff_size))
+    header.extend(b"WAVE")
+    header.extend(b"fmt ")
+    header.extend(struct.pack("<I", 16))  # Subchunk1Size (16 for PCM)
+    header.extend(struct.pack("<H", 1))   # AudioFormat (1 for PCM)
+    header.extend(struct.pack("<H", num_channels))
+    header.extend(struct.pack("<I", sample_rate))
+    header.extend(struct.pack("<I", byte_rate))
+    header.extend(struct.pack("<H", block_align))
+    header.extend(struct.pack("<H", bits_per_sample))
+    header.extend(b"data")
+    header.extend(struct.pack("<I", data_size))
+    return bytes(header) + pcm_bytes
+
+
 def _get_shared_client(timeout: float) -> httpx.AsyncClient:
     global _SHARED_CLIENT
     if _SHARED_CLIENT is None or _SHARED_CLIENT.is_closed:
@@ -113,21 +140,21 @@ class GnaniTTSProvider(BaseTTSProvider):
                     detail={"error_code": "UPSTREAM_ERROR", "message": err_detail}
                 )
 
-            # Gnani /api/v1/tts/inference returns raw binary audio (WAV/MP3) or JSON with audio base64
+            # Gnani /api/v1/tts/inference returns raw binary audio (linear PCM) or JSON with audio base64
             content_type = response.headers.get("content-type", "audio/wav")
             audio_b64 = ""
 
             if "application/json" in content_type:
                 data = response.json()
-                if "audio" in data:
-                    audio_b64 = data["audio"]
-                elif "audio_content" in data:
-                    audio_b64 = data["audio_content"]
-                elif "data" in data and isinstance(data["data"], dict):
-                    audio_b64 = data["data"].get("audio", "")
+                raw_b64 = data.get("audio") or data.get("audio_content") or (data.get("data", {}) if isinstance(data.get("data"), dict) else {}).get("audio", "")
+                if raw_b64:
+                    raw_bytes = base64.b64decode(raw_b64)
+                    wav_bytes = _wrap_pcm_as_wav(raw_bytes, sample_rate=16000, num_channels=1, bits_per_sample=16)
+                    audio_b64 = base64.b64encode(wav_bytes).decode("utf-8")
             else:
-                # Raw binary audio returned
-                audio_b64 = base64.b64encode(response.content).decode("utf-8")
+                # Raw binary audio returned - wrap linear PCM into standard WAV container
+                wav_bytes = _wrap_pcm_as_wav(response.content, sample_rate=16000, num_channels=1, bits_per_sample=16)
+                audio_b64 = base64.b64encode(wav_bytes).decode("utf-8")
 
             res_metadata = TTSResponseMetadata(
                 audio_base64=audio_b64,

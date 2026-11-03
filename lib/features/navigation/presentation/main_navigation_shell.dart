@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/services/auth_service.dart';
 import '../../../core/services/overlay_service.dart';
 import '../../../core/widgets/floating_pet_avatar.dart';
 import '../../../core/widgets/polypet_bottom_nav.dart';
@@ -50,6 +51,26 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
     super.initState();
     _ticker = createTicker(_onTick)..start();
     _initOverlayListener();
+
+    // Ground the in-app pet immediately on startup with a natural initial settling drop
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final media = MediaQuery.of(context);
+      final screenW = media.size.width;
+      final screenH = media.size.height;
+      final bottomInset = media.padding.bottom;
+      final floorY = _floor(screenH, bottomInset);
+      setState(() {
+        _petPos = Offset((screenW - 150.0) / 2.0, floorY - 50.0);
+        _tx = _petPos.dx;
+      });
+
+      // Synchronize Supabase authentication token with native floating overlay service
+      final token = AuthService.instance.currentAccessToken;
+      if (token != null && token.isNotEmpty) {
+        OverlayService.instance.updateAuthToken(token);
+      }
+    });
   }
 
   void _initOverlayListener() {

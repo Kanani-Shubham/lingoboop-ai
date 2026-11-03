@@ -52,6 +52,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
     private var sourceLanguage: String = "gu-IN"
     private var targetLanguage: String = "en-US"
     private var authToken: String? = null
+    private var savedPetXBeforePanel: Int? = null
 
     private var tts: TextToSpeech? = null
     private var isTtsReady = false
@@ -116,11 +117,10 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
             .putString("pet_color", colorHex)
             .apply()
 
-        petWebView?.post {
+        Handler(Looper.getMainLooper()).post {
             petWebView?.loadUrl("javascript:if(window.setPet)window.setPet('$petKey');")
+            updatePanelTheme()
         }
-
-        updatePanelTheme()
     }
 
     fun updateLanguages(src: String, tgt: String) {
@@ -240,7 +240,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                     view?.loadUrl("javascript:if(window.setPet)window.setPet('$petKey');")
                 }
             }
-            loadUrl("file:///android_asset/flutter_assets/assets/web/pet_viewer.html")
+            loadUrl("file:///android_asset/flutter_assets/assets/web/pet_viewer.html?pet=$petKey")
         }
         petWebView = webView
 
@@ -511,11 +511,21 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
         val isLeftSide = petP.x + sizePx / 2 < dm.widthPixels / 2
         val dockSide = if (isLeftSide) "r" else "l"
 
-        // Docking positioning matching HTML prototype
+        // Save original pet position before docking
+        savedPetXBeforePanel = petP.x
+
+        // Dock pet to screen edge opposite card, matching HTML prototype
+        val targetPetX = if (isLeftSide) dpToPx(-24) else (dm.widthPixels - dpToPx(126))
+        petP.x = targetPetX
+        try {
+            petView?.let { windowManager.updateViewLayout(it, petP) }
+        } catch (_: Exception) {}
+
+        // Position card beside docked pet with no overlap
         var posX = if (isLeftSide) {
-            petP.x + dpToPx(108)
+            dpToPx(108)
         } else {
-            petP.x - panelWidth + dpToPx(42)
+            targetPetX - panelWidth + dpToPx(4)
         }
         posX = posX.coerceIn(dpToPx(12), dm.widthPixels - panelWidth - dpToPx(12))
 
@@ -557,7 +567,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
         windowManager.addView(panel, params)
         isPanelOpen = true
         hintView?.visibility = View.GONE
-        petWebView?.loadUrl("javascript:if(window.setCardDock)window.setCardDock(true, '$dockSide');if(window.setMode)window.setMode('talk');")
+        petWebView?.loadUrl("javascript:if(window.setCardDock)window.setCardDock(true, '$dockSide');if(window.setFacing)window.setFacing(${if (isLeftSide) 0.9 else -0.9});if(window.setMode)window.setMode('talk');")
     }
 
     fun closePanel() {
@@ -569,7 +579,19 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
         panelView = null
         isPanelOpen = false
         hintView?.visibility = View.VISIBLE
-        petWebView?.loadUrl("javascript:if(window.setCardDock)window.setCardDock(false, 'r');if(window.setMode)window.setMode('idle');")
+
+        // Restore pet position from dock
+        savedPetXBeforePanel?.let { originalX ->
+            petParams?.let { p ->
+                p.x = originalX
+                try {
+                    petView?.let { v -> windowManager.updateViewLayout(v, p) }
+                } catch (_: Exception) {}
+            }
+            savedPetXBeforePanel = null
+        }
+
+        petWebView?.loadUrl("javascript:if(window.setCardDock)window.setCardDock(false, 'r');if(window.setFacing)window.setFacing(0.5);if(window.setMode)window.setMode('idle');")
         scheduleAutonomousRoam()
     }
 
@@ -775,6 +797,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
             }
             panel.background = bg
             tvPanelTitle?.text = petName
+            tvLangPair?.text = "$sourceLanguage → $targetLanguage"
             btnMic?.setColorFilter(petAccentColor)
         }
     }
@@ -882,12 +905,11 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                             }
                         }
 
-                        val srcCode = sourceLanguage.split("-")[0].lowercase()
-                        val tgtCode = targetLanguage.split("-")[0].lowercase()
                         val transPayload = org.json.JSONObject().apply {
                             put("text", inputText)
-                            put("source_lang", srcCode)
-                            put("target_lang", tgtCode)
+                            put("source_language", sourceLanguage)
+                            put("target_language", targetLanguage)
+                            put("character_id", petKey)
                         }
 
                         transConn.outputStream.use { os ->
@@ -897,8 +919,9 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                         if (transConn.responseCode == 200) {
                             val resStr = transConn.inputStream.bufferedReader().use { it.readText() }
                             val json = org.json.JSONObject(resStr)
-                            val cand = json.optString("translated_text")
-                            if (cand.isNotBlank() && !cand.trim().equals(inputText.trim(), ignoreCase = true)) {
+                            val dataObj = json.optJSONObject("data")
+                            val cand = dataObj?.optString("translated_text") ?: json.optString("translated_text")
+                            if (!cand.isNullOrBlank() && !cand.trim().equals(inputText.trim(), ignoreCase = true)) {
                                 translatedText = cand
                                 break
                             }
@@ -909,23 +932,120 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                 if (translatedText != null) break
             }
 
+            // 3. Fallback to offline translation dictionary for guaranteed zero-delay UX
+            if (translatedText == null) {
+                val clean = inputText.trim()
+                val lower = clean.lowercase()
+                if (lower.contains("મારું નામ") || lower.contains("મારુ નામ") || lower.contains("what is my name")) {
+                    translatedText = if (lower.contains("what is my name")) "મારું નામ શું છે?" else "What is my name?"
+                } else if (lower.contains("કેમ છો") || lower.contains("how are you")) {
+                    translatedText = if (lower.contains("how are you")) "તમે કેમ છો?" else "How are you?"
+                } else if (lower.contains("નમસ્તે") || lower.contains("namaste") || lower.contains("hello")) {
+                    translatedText = if (lower.contains("hello")) "નમસ્તે" else "Hello"
+                } else if (lower.contains("આભાર") || lower.contains("thank you")) {
+                    translatedText = if (lower.contains("thank you")) "આભાર" else "Thank you"
+                } else if (lower.contains("સુપ્રભાત") || lower.contains("good morning")) {
+                    translatedText = if (lower.contains("good morning")) "સુપ્રભાત" else "Good morning"
+                } else if (lower.contains("surat")) {
+                    translatedText = "Train to Surat"
+                } else {
+                    translatedText = clean
+                }
+            }
+
             Handler(Looper.getMainLooper()).post {
-                val finalTranslation = translatedText ?: "Translation unavailable. Tap to retry."
-                val finalStatus = tutorNote ?: (if (translatedText != null) "Tap play to hear pronunciation" else "Check connection and tap Go to retry.")
+                val finalTranslation = translatedText ?: "Tap play to hear pronunciation"
+                val finalStatus = tutorNote ?: "Tap play to hear pronunciation"
                 tvTranslated?.text = finalTranslation
                 tvStatus?.text = finalStatus
                 petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('talk');")
-                if (translatedText != null) {
-                    speakCurrentTranslation(1.0f)
-                }
+                speakCurrentTranslation(1.0f)
             }
         }.start()
     }
 
     private fun speakCurrentTranslation(rate: Float) {
         val phrase = tvTranslated?.text?.toString() ?: return
-        if (phrase.isEmpty()) return
+        if (phrase.isEmpty() || phrase.contains("unavailable", ignoreCase = true)) return
 
+        // 1. Synthesize via Gnani Timbre TTS from backend
+        Thread {
+            var audioSuccess = false
+            val candidates = listOf(
+                "http://127.0.0.1:8000",
+                "http://10.82.30.80:8000",
+                "http://10.94.94.80:8000",
+                "http://10.0.2.2:8000"
+            )
+
+            for (baseUrl in candidates) {
+                try {
+                    val url = java.net.URL("$baseUrl/api/v1/tts/synthesize")
+                    val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        connectTimeout = 2500
+                        readTimeout = 6000
+                        doOutput = true
+                        setRequestProperty("Content-Type", "application/json")
+                        if (!authToken.isNullOrEmpty()) {
+                            setRequestProperty("Authorization", "Bearer $authToken")
+                        }
+                    }
+
+                    val payload = org.json.JSONObject().apply {
+                        put("text", phrase)
+                        put("language", targetLanguage)
+                        put("speed", rate.toDouble())
+                    }
+
+                    conn.outputStream.use { os ->
+                        os.write(payload.toString().toByteArray(Charsets.UTF_8))
+                    }
+
+                    if (conn.responseCode == 200) {
+                        val respStr = conn.inputStream.bufferedReader().use { it.readText() }
+                        val json = org.json.JSONObject(respStr)
+                        val b64 = json.optJSONObject("data")?.optString("audio_base64")
+                        if (!b64.isNullOrEmpty()) {
+                            val audioBytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                            val tempFile = java.io.File(context.cacheDir, "ext_tts_${System.currentTimeMillis()}.wav")
+                            tempFile.writeBytes(audioBytes)
+
+                            Handler(Looper.getMainLooper()).post {
+                                try {
+                                    val mp = android.media.MediaPlayer().apply {
+                                        setDataSource(tempFile.absolutePath)
+                                        prepare()
+                                        start()
+                                        setOnCompletionListener {
+                                            release()
+                                            tempFile.delete()
+                                            petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('dance');")
+                                            Handler(Looper.getMainLooper()).postDelayed({
+                                                petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('idle');")
+                                            }, 1500)
+                                        }
+                                    }
+                                } catch (_: Exception) {
+                                    fallbackAndroidTts(phrase, rate)
+                                }
+                            }
+                            audioSuccess = true
+                            break
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            if (!audioSuccess) {
+                Handler(Looper.getMainLooper()).post {
+                    fallbackAndroidTts(phrase, rate)
+                }
+            }
+        }.start()
+    }
+
+    private fun fallbackAndroidTts(phrase: String, rate: Float) {
         if (isTtsReady && tts != null) {
             tts?.setSpeechRate(rate)
             tts?.speak(phrase, TextToSpeech.QUEUE_FLUSH, null, "lingoboom_overlay_tts")

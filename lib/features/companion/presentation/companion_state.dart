@@ -484,25 +484,38 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     playKaraoke(1.0);
   }
 
-  /// Play audio with karaoke highlighting (1.0x or 0.7x)
+  /// Play audio with karaoke highlighting (1.0x or 0.75x)
   void playKaraoke(double rate) {
     _karaokeTimer?.cancel();
+
+    // Ensure words exist for karaoke view if translated text is present
+    if (state.words.isEmpty && state.translatedText.isNotEmpty) {
+      final rawWords = state.translatedText.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+      final wordList = rawWords
+          .map((w) => KaraokeWord(text: w, isHighlighted: false, evaluation: WordEvaluationState.none))
+          .toList();
+      state = state.copyWith(words: wordList);
+    }
+
     if (state.words.isEmpty) return;
 
-    // Play synthesized audio file if available
+    // Play synthesized audio file if available and on disk
     if (state.lastTtsPath != null) {
       SpeechService.instance.playAudioFile(state.lastTtsPath!, speed: rate);
     } else {
       final textToSpeak = state.translatedText.isNotEmpty ? state.translatedText : state.spokenText;
       if (textToSpeak.isNotEmpty) {
+        state = state.copyWith(statusNote: 'Synthesizing voice…');
         SpeechService.instance.synthesizeTTS(
           text: textToSpeak,
           languageCode: state.targetLanguage.bcp47,
-          speed: rate,
+          speed: 1.0,
         ).then((path) {
           if (path != null) {
-            state = state.copyWith(lastTtsPath: path);
+            state = state.copyWith(lastTtsPath: path, statusNote: '');
             SpeechService.instance.playAudioFile(path, speed: rate);
+          } else {
+            state = state.copyWith(statusNote: 'Tap Repeat to test your pronunciation!');
           }
         });
       }
