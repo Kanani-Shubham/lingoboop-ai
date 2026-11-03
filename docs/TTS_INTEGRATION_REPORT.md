@@ -108,3 +108,35 @@ The following log statements are now emitted during every TTS interaction:
 - **Flutter Analyzer:** **0 issues found** (`flutter analyze`)
 - **Flutter Unit Tests:** **22 passed** (`flutter test`)
 - **Built APK:** `build\app\outputs\flutter-apk\app-debug.apk` built cleanly in 86.0s
+
+---
+
+## 5. Physical Android Device Verification Logcat
+
+Tested directly on physical device `10BCBF23HT000H7` (Android 14 API 34) with live backend server daemon (`0.0.0.0:8000`) and active ADB reverse tunnel (`tcp:8000 tcp:8000`):
+
+### 1.0x Normal Playback Verification:
+```text
+11-03 16:39:11.057 I flutter : [SpeechService] Audio file validated: /data/user/0/com.lingoboop.lingoboop/cache/lingo_tts_1793703902427.wav (83244 bytes)
+11-03 16:39:11.057 I flutter : [SpeechService] Audio player initialization starting...
+11-03 16:39:11.067 I flutter : [SpeechService] AudioSession activated for speech playback
+11-03 16:39:11.175 W AudioSystem: setParameters: PlaybackCaptureProtectSupport=com.lingoboop.lingoboop
+11-03 16:39:11.222 I flutter : [SpeechService] Audio playback started: speed=1.0, volume=1.0
+11-03 16:39:11.223 I flutter : [SpeechService] Audio playback state changed: playing=true, processingState=ProcessingState.ready
+11-03 16:39:14.073 I flutter : [SpeechService] Audio playback state changed: playing=true, processingState=ProcessingState.completed
+11-03 16:39:14.073 I flutter : [SpeechService] Playback completed successfully
+```
+*(Exact duration: 2.85 seconds through phone speaker DAC)*
+
+### 0.75x Slow Playback Verification:
+```text
+11-03 16:39:24.363 I flutter : [SpeechService] Audio file validated: /data/user/0/com.lingoboop.lingoboop/cache/lingo_tts_1793703902427.wav (83244 bytes)
+11-03 16:39:24.388 I flutter : [SpeechService] AudioSession activated for speech playback
+11-03 16:39:24.496 W AudioSystem: setParameters: PlaybackCaptureProtectSupport=com.lingoboop.lingoboop
+11-03 16:39:24.536 I flutter : [SpeechService] Audio playback started: speed=0.75, volume=1.0
+11-03 16:39:24.537 I flutter : [SpeechService] Audio playback state changed: playing=true, processingState=ProcessingState.ready
+11-03 16:39:28.098 I flutter : [SpeechService] Audio playback state changed: playing=true, processingState=ProcessingState.completed
+11-03 16:39:28.098 I flutter : [SpeechService] Playback completed successfully
+```
+*(Exact duration: 3.56 seconds at 0.75x speed)*
+
