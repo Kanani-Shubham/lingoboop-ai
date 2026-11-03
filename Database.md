@@ -25,6 +25,9 @@
 | `daily_goal_minutes` | `int4` |  |
 | `created_at` | `timestamptz` |  |
 | `updated_at` | `timestamptz` |  |
+| `overlay_enabled` | `bool` |  |
+| `overlay_position_x` | `numeric` |  Nullable |
+| `overlay_position_y` | `numeric` |  Nullable |
 
 ## Table `user_languages`
 

@@ -7,6 +7,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
+import 'auth_service.dart';
 
 class SpeechService {
   SpeechService._();
@@ -24,6 +25,16 @@ class SpeechService {
 
   bool get isRecording => _isRecording;
 
+  Map<String, String> _buildHeaders({bool isJson = true}) {
+    final headers = <String, String>{};
+    if (isJson) headers['Content-Type'] = 'application/json';
+    final token = AuthService.instance.currentAccessToken;
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+    return headers;
+  }
+
   void setBackendUrl(String url) {
     _backendBaseUrl = url.replaceAll(RegExp(r'/+$'), '');
   }
@@ -34,6 +45,7 @@ class SpeechService {
   Future<String> resolveBackendUrl() async {
     const candidates = [
       'http://127.0.0.1:8000',
+      'http://10.82.30.80:8000',
       'http://10.94.94.80:8000',
       'http://10.0.2.2:8000',
     ];
@@ -107,38 +119,46 @@ class SpeechService {
     required String audioPath,
     required String languageCode,
   }) async {
-    try {
-      final file = File(audioPath);
-      if (!await file.exists()) {
-        debugPrint('[SpeechService] Audio file does not exist: $audioPath');
-        return null;
-      }
-
-      final url = Uri.parse('$_backendBaseUrl/api/v1/stt/transcribe');
-      final request = http.MultipartRequest('POST', url);
-
-      request.fields['language_code'] = languageCode;
-      request.fields['model'] = 'prisma-v3.0';
-
-      request.files.add(
-        await http.MultipartFile.fromPath('audio_file', audioPath),
-      );
-
-      final streamedResponse = await request.send().timeout(const Duration(seconds: 15));
-      final responseBody = await streamedResponse.stream.bytesToString();
-
-      if (streamedResponse.statusCode == 200) {
-        final decoded = jsonDecode(responseBody) as Map<String, dynamic>;
-        if (decoded['success'] == true && decoded['data'] != null) {
-          final transcript = (decoded['data']['transcript'] as String?)?.trim();
-          debugPrint('[SpeechService] STT Success: "$transcript"');
-          return transcript;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        final file = File(audioPath);
+        if (!await file.exists()) {
+          debugPrint('[SpeechService] Audio file does not exist: $audioPath');
+          return null;
         }
-      } else {
-        debugPrint('[SpeechService] STT Failed (${streamedResponse.statusCode}): $responseBody');
+
+        final url = Uri.parse('$_backendBaseUrl/api/v1/stt/transcribe');
+        final request = http.MultipartRequest('POST', url);
+
+        final authHeader = _buildHeaders(isJson: false);
+        request.headers.addAll(authHeader);
+
+        request.fields['language_code'] = languageCode;
+        request.fields['model'] = 'prisma-v3.0';
+
+        request.files.add(
+          await http.MultipartFile.fromPath('audio_file', audioPath),
+        );
+
+        final streamedResponse = await request.send().timeout(const Duration(seconds: 15));
+        final responseBody = await streamedResponse.stream.bytesToString();
+
+        if (streamedResponse.statusCode == 200) {
+          final decoded = jsonDecode(responseBody) as Map<String, dynamic>;
+          if (decoded['success'] == true && decoded['data'] != null) {
+            final transcript = (decoded['data']['transcript'] as String?)?.trim();
+            debugPrint('[SpeechService] STT Success: "$transcript"');
+            return transcript;
+          }
+        } else {
+          debugPrint('[SpeechService] STT Failed (${streamedResponse.statusCode}): $responseBody');
+        }
+      } catch (e) {
+        debugPrint('[SpeechService] STT Network/Request Exception (attempt $attempt): $e');
+        if (attempt == 0) {
+          await resolveBackendUrl();
+        }
       }
-    } catch (e) {
-      debugPrint('[SpeechService] STT Network/Request Exception: $e');
     }
     return null;
   }
@@ -153,34 +173,39 @@ class SpeechService {
     List<Map<String, String>> history = const [],
     String mode = 'tutor',
   }) async {
-    try {
-      final url = Uri.parse('$_backendBaseUrl/api/v1/ai/tutor');
-      final resp = await http
-          .post(
-            url,
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'user_message': userMessage,
-              'native_language': nativeLang,
-              'target_language': targetLang,
-              'proficiency_level': proficiencyLevel,
-              'character_id': characterId,
-              'history': history,
-              'mode': mode,
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        final url = Uri.parse('$_backendBaseUrl/api/v1/ai/tutor');
+        final resp = await http
+            .post(
+              url,
+              headers: _buildHeaders(),
+              body: jsonEncode({
+                'user_message': userMessage,
+                'native_language': nativeLang,
+                'target_language': targetLang,
+                'proficiency_level': proficiencyLevel,
+                'character_id': characterId,
+                'history': history,
+                'mode': mode,
+              }),
+            )
+            .timeout(const Duration(seconds: 15));
 
-      if (resp.statusCode == 200) {
-        final decoded = jsonDecode(resp.body) as Map<String, dynamic>;
-        if (decoded['success'] == true && decoded['data'] != null) {
-          return decoded['data'] as Map<String, dynamic>;
+        if (resp.statusCode == 200) {
+          final decoded = jsonDecode(resp.body) as Map<String, dynamic>;
+          if (decoded['success'] == true && decoded['data'] != null) {
+            return decoded['data'] as Map<String, dynamic>;
+          }
+        } else {
+          debugPrint('[SpeechService] AI Tutor error (${resp.statusCode}): ${resp.body}');
         }
-      } else {
-        debugPrint('[SpeechService] AI Tutor error (${resp.statusCode}): ${resp.body}');
+      } catch (e) {
+        debugPrint('[SpeechService] Groq AI Tutor connection exception (attempt $attempt): $e');
+        if (attempt == 0) {
+          await resolveBackendUrl();
+        }
       }
-    } catch (e) {
-      debugPrint('[SpeechService] Groq AI Tutor connection exception: $e');
     }
     return null;
   }
@@ -197,7 +222,7 @@ class SpeechService {
       final resp = await http
           .post(
             url,
-            headers: {'Content-Type': 'application/json'},
+            headers: _buildHeaders(),
             body: jsonEncode({
               'text': text,
               'source_language': sourceLang,
@@ -259,7 +284,7 @@ class SpeechService {
       final resp = await http
           .post(
             url,
-            headers: {'Content-Type': 'application/json'},
+            headers: _buildHeaders(),
             body: jsonEncode({
               'text': text,
               'voice': voice,

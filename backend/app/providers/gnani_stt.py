@@ -5,6 +5,18 @@ from app.core.config import settings
 from app.providers.base import BaseSTTProvider
 from app.schemas.stt import STTResponseData, WordConfidence
 
+_SHARED_STT_CLIENT: Optional[httpx.AsyncClient] = None
+
+
+def _get_shared_stt_client(timeout: float) -> httpx.AsyncClient:
+    global _SHARED_STT_CLIENT
+    if _SHARED_STT_CLIENT is None or _SHARED_STT_CLIENT.is_closed:
+        _SHARED_STT_CLIENT = httpx.AsyncClient(
+            timeout=timeout,
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=50)
+        )
+    return _SHARED_STT_CLIENT
+
 
 class GnaniSTTProvider(BaseSTTProvider):
     """
@@ -57,13 +69,13 @@ class GnaniSTTProvider(BaseSTTProvider):
         }
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    self.endpoint_url,
-                    headers=headers,
-                    files=files,
-                    data=data
-                )
+            client = _get_shared_stt_client(self.timeout)
+            response = await client.post(
+                self.endpoint_url,
+                headers=headers,
+                files=files,
+                data=data
+            )
 
             # Handle HTTP errors safely without leaking headers/keys
             if response.status_code == 401 or response.status_code == 403:

@@ -252,108 +252,115 @@ class _PolyCardWidgetState extends ConsumerState<PolyCardWidget>
             const SizedBox(height: 8),
 
             // .row: Control strip with Play, Slow, Repeat, and pulsing Mic
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // #play: circle #fff3 button
-                  InkWell(
-                    onTap: () => notifier.playKaraoke(1.0),
-                    borderRadius: BorderRadius.circular(999),
-                    child: Container(
-                      width: 34,
-                      height: 34,
-                      decoration: const BoxDecoration(
-                        color: Color(0x33FFFFFF), // #fff3
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Center(
-                        child: Icon(Icons.play_arrow, color: Colors.white, size: 19),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-
-                  // #slow: pill button
-                  InkWell(
-                    onTap: () => notifier.playKaraoke(0.75),
-                    borderRadius: BorderRadius.circular(999),
-                    child: Container(
-                      height: 34,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      decoration: BoxDecoration(
-                        color: const Color(0x33FFFFFF),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Center(
-                        child: Text(
-                          'Slow',
-                          style: GoogleFonts.fredoka(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.white,
+            LayoutBuilder(
+              builder: (context, constraints) {
+                return SizedBox(
+                  width: constraints.maxWidth,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // #play: circle #fff3 button
+                        InkWell(
+                          onTap: () => notifier.playKaraoke(1.0),
+                          borderRadius: BorderRadius.circular(999),
+                          child: Container(
+                            width: 34,
+                            height: 34,
+                            decoration: const BoxDecoration(
+                              color: Color(0x33FFFFFF), // #fff3
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Center(
+                              child: Icon(Icons.play_arrow, color: Colors.white, size: 19),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
+                        const SizedBox(width: 4),
 
-                  // #rep: pill button
-                  InkWell(
-                    onTap: () {
-                      if (state.isListening && state.isRepeatPracticing) {
-                        notifier.stopRepeatPractice();
-                      } else {
-                        notifier.startRepeatPractice();
-                      }
-                    },
-                    borderRadius: BorderRadius.circular(999),
-                    child: Container(
-                      height: 34,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      decoration: BoxDecoration(
-                        color: state.isRepeatPracticing
-                            ? Colors.white
-                            : const Color(0x33FFFFFF),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Center(
-                        child: Text(
-                          state.isRepeatPracticing ? 'Done' : 'Repeat',
-                          style: GoogleFonts.fredoka(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w500,
-                            color: state.isRepeatPracticing
-                                ? state.activePet.accentColor
-                                : Colors.white,
+                        // #slow: pill button
+                        InkWell(
+                          onTap: () => notifier.playKaraoke(0.75),
+                          borderRadius: BorderRadius.circular(999),
+                          child: Container(
+                            height: 34,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0x33FFFFFF),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Center(
+                              child: Text(
+                                'Slow',
+                                style: GoogleFonts.fredoka(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
                           ),
                         ),
-                      ),
+                        const SizedBox(width: 4),
+
+                        // #rep: pill button
+                        InkWell(
+                          onTap: () {
+                            if (state.isListening && state.isRepeatPracticing) {
+                              notifier.stopRepeatPractice();
+                            } else {
+                              notifier.startRepeatPractice();
+                            }
+                          },
+                          borderRadius: BorderRadius.circular(999),
+                          child: Container(
+                            height: 34,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            decoration: BoxDecoration(
+                              color: state.isRepeatPracticing
+                                  ? Colors.white
+                                  : const Color(0x33FFFFFF),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Center(
+                              child: Text(
+                                state.isRepeatPracticing ? 'Done' : 'Repeat',
+                                style: GoogleFonts.fredoka(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w500,
+                                  color: state.isRepeatPracticing
+                                      ? state.activePet.accentColor
+                                      : Colors.white,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+
+                        // #mic: circle with white background, accent icon, pulsing when active
+                        _PulsingMicButton(
+                          isListening: state.isListening,
+                          accentColor: state.activePet.accentColor,
+                          onTap: () {
+                            if (state.isListening) {
+                              if (state.isRepeatPracticing) {
+                                notifier.stopRepeatPractice();
+                              } else {
+                                notifier.stopListeningAndProcess();
+                              }
+                            } else {
+                              notifier.startListening();
+                            }
+                          },
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 6),
-
-                  // #mic: circle with white background, accent icon, pulsing when active
-                  _PulsingMicButton(
-                    isListening: state.isListening,
-                    accentColor: state.activePet.accentColor,
-                    onTap: () {
-                      if (state.isListening) {
-                        if (state.isRepeatPracticing) {
-                          notifier.stopRepeatPractice();
-                        } else {
-                          notifier.stopListeningAndProcess();
-                        }
-                      } else {
-                        notifier.startListening();
-                      }
-                    },
-                  ),
-                ],
-              ),
+                );
+              },
             ),
 
             // #tf & #ti: 36px height input field with #0003 background

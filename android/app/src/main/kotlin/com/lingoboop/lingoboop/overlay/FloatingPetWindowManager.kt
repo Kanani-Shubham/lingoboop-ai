@@ -59,6 +59,9 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
     // Autonomous wandering handler
     private val roamHandler = Handler(Looper.getMainLooper())
     private var roamRunnable: Runnable? = null
+    private var isOverlayVisible = true
+    private var currentWalkAnim: ValueAnimator? = null
+    private var currentSnapAnim: ValueAnimator? = null
 
     // UI elements in floating PolyCard
     private var tvPanelTitle: TextView? = null
@@ -124,10 +127,42 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
     }
 
     fun setOverlayVisibility(visible: Boolean) {
-        val vis = if (visible) View.VISIBLE else View.GONE
-        petView?.visibility = vis
-        if (!visible && isPanelOpen) {
-            panelView?.visibility = View.GONE
+        Handler(Looper.getMainLooper()).post {
+            isOverlayVisible = visible
+            if (visible) {
+                petParams?.let { params ->
+                    val sizePx = dpToPx(150)
+                    params.width = sizePx
+                    params.height = sizePx
+                    params.alpha = 1.0f
+                    params.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                    try {
+                        petView?.let { windowManager.updateViewLayout(it, params) }
+                    } catch (_: Exception) {}
+                }
+                petView?.visibility = View.VISIBLE
+                petWebView?.visibility = View.VISIBLE
+                hintView?.visibility = if (isPanelOpen) View.GONE else View.VISIBLE
+                scheduleAutonomousRoam()
+            } else {
+                cancelAutonomousRoam()
+                closePanel()
+                petView?.visibility = View.GONE
+                petWebView?.visibility = View.GONE
+                hintView?.visibility = View.GONE
+                petParams?.let { params ->
+                    params.width = 0
+                    params.height = 0
+                    params.alpha = 0.0f
+                    params.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                    try {
+                        petView?.let { windowManager.updateViewLayout(it, params) }
+                    } catch (_: Exception) {}
+                }
+            }
         }
     }
 
@@ -137,6 +172,9 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
 
         val dm = DisplayMetrics()
         windowManager.defaultDisplay.getMetrics(dm)
+
+        val startVisible = !com.lingoboop.lingoboop.MainActivity.isAppInForeground
+        isOverlayVisible = startVisible
 
         // Exact prototype pet size: 150px x 150px
         val sizePx = dpToPx(150)
@@ -151,16 +189,23 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
         }
 
         val params = WindowManager.LayoutParams(
-            sizePx,
-            sizePx,
+            if (startVisible) sizePx else 0,
+            if (startVisible) sizePx else 0,
             layoutFlag,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            if (startVisible) {
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+            } else {
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+            },
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             x = initialX.coerceIn(0, dm.widthPixels - sizePx)
             y = initialY.coerceIn(dpToPx(40), dm.heightPixels - sizePx - dpToPx(60))
+            alpha = if (startVisible) 1.0f else 0.0f
         }
         petParams = params
 
@@ -218,9 +263,11 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
             background = hintBg
             setPadding(dpToPx(10), dpToPx(4), dpToPx(10), dpToPx(4))
             elevation = dpToPx(4).toFloat()
-            visibility = if (isPanelOpen) View.GONE else View.VISIBLE
+            visibility = if (startVisible && !isPanelOpen) View.VISIBLE else View.GONE
         }
         hintView = hint
+        container.visibility = if (startVisible) View.VISIBLE else View.GONE
+        webView.visibility = if (startVisible) View.VISIBLE else View.GONE
         val hintParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,
             FrameLayout.LayoutParams.WRAP_CONTENT
@@ -285,6 +332,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                         val targetX = if (curParams.x + sizePx / 2 < screenWidth / 2) snapLeftX else snapRightX
 
                         val snapAnimator = ValueAnimator.ofInt(curParams.x, targetX)
+                        currentSnapAnim = snapAnimator
                         snapAnimator.duration = 200
                         snapAnimator.interpolator = DecelerateInterpolator()
                         snapAnimator.addUpdateListener { anim ->
@@ -312,15 +360,17 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
 
         petView = container
         windowManager.addView(container, params)
-        scheduleAutonomousRoam()
+        if (startVisible) {
+            scheduleAutonomousRoam()
+        }
     }
 
     private fun scheduleAutonomousRoam() {
         cancelAutonomousRoam()
-        if (isPanelOpen || petView == null) return
+        if (!isOverlayVisible || isPanelOpen || petView == null || petView?.visibility != View.VISIBLE) return
 
         roamRunnable = Runnable {
-            if (isPanelOpen || petView == null) return@Runnable
+            if (!isOverlayVisible || isPanelOpen || petView == null || petView?.visibility != View.VISIBLE) return@Runnable
             val dm = DisplayMetrics()
             windowManager.defaultDisplay.getMetrics(dm)
             val curParams = petParams ?: return@Runnable
@@ -345,22 +395,30 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                     }
                     addListener(object : AnimatorListenerAdapter() {
                         override fun onAnimationEnd(animation: Animator) {
+                            currentWalkAnim = null
                             petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('idle');")
                             prefs.edit().putInt("pos_x", curParams.x).apply()
-                            scheduleAutonomousRoam()
+                            if (isOverlayVisible && !isPanelOpen) {
+                                scheduleAutonomousRoam()
+                            }
                         }
                     })
                 }
+                currentWalkAnim = walkAnim
                 walkAnim.start()
             } else {
                 if (Math.random() < 0.25) {
                     petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('dance');")
                     roamHandler.postDelayed({
                         petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('idle');")
-                        scheduleAutonomousRoam()
+                        if (isOverlayVisible && !isPanelOpen) {
+                            scheduleAutonomousRoam()
+                        }
                     }, 2600)
                 } else {
-                    scheduleAutonomousRoam()
+                    if (isOverlayVisible && !isPanelOpen) {
+                        scheduleAutonomousRoam()
+                    }
                 }
             }
         }
@@ -368,8 +426,12 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
     }
 
     private fun cancelAutonomousRoam() {
-        roamRunnable?.let { roamHandler.removeCallbacks(it) }
+        roamHandler.removeCallbacksAndMessages(null)
         roamRunnable = null
+        currentWalkAnim?.cancel()
+        currentWalkAnim = null
+        currentSnapAnim?.cancel()
+        currentSnapAnim = null
     }
 
     fun hidePet() {
@@ -745,13 +807,14 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
             var tutorNote: String? = null
             val candidates = listOf(
                 "http://127.0.0.1:8000",
+                "http://10.82.30.80:8000",
                 "http://10.94.94.80:8000",
                 "http://10.0.2.2:8000"
             )
 
             for (baseUrl in candidates) {
                 try {
-                    val url = java.net.URL("$baseUrl/api/ai/tutor")
+                    val url = java.net.URL("$baseUrl/api/v1/ai/tutor")
                     val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
                         requestMethod = "POST"
                         connectTimeout = 2500
@@ -761,10 +824,11 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                     }
 
                     val payload = org.json.JSONObject().apply {
-                        put("source_text", inputText)
-                        put("source_lang", sourceLanguage)
-                        put("target_lang", targetLanguage)
-                        put("active_character_id", petKey)
+                        put("user_message", inputText)
+                        put("native_language", sourceLanguage)
+                        put("target_language", targetLanguage)
+                        put("character_id", petKey)
+                        put("mode", "tutor")
                     }
 
                     conn.outputStream.use { os ->
@@ -776,9 +840,11 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                         val json = org.json.JSONObject(responseStr)
                         if (json.optBoolean("success", false)) {
                             val data = json.optJSONObject("data")
-                            translatedText = data?.optString("target_translation")
+                            translatedText = data?.optString("translated_text")
+                                ?: data?.optString("reply_text")
                                 ?: data?.optString("translation")
                             tutorNote = data?.optString("explanation")
+                                ?: data?.optString("pronunciation_guide")
                             break
                         }
                     }

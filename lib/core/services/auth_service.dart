@@ -18,6 +18,8 @@ class AuthService {
 
   User? get currentUser => _client?.auth.currentUser;
 
+  String? get currentAccessToken => _client?.auth.currentSession?.accessToken;
+
   bool get isAuthenticated => currentUser != null;
 
   Stream<AuthState>? get authStateChanges => _client?.auth.onAuthStateChange;

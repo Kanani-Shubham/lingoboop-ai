@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     SUPABASE_URL: Optional[str] = Field(default=None, description="Supabase project URL")
     SUPABASE_ANON_KEY: Optional[str] = Field(default=None, description="Supabase public anon key")
     SUPABASE_SERVICE_ROLE_KEY: Optional[str] = Field(default=None, description="Supabase backend-only service role key")
+    SUPABASE_JWT_SECRET: Optional[str] = Field(default=None, description="Supabase project JWT secret for local cryptographic verification")
     DATABASE_URL: Optional[str] = Field(default=None, description="Direct PostgreSQL database connection URL")
 
     # Pydantic Settings Config: check backend/.env first, then root .env

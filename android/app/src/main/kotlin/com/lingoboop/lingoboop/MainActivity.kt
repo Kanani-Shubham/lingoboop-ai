@@ -20,6 +20,16 @@ class MainActivity : FlutterActivity() {
         var isAppInForeground: Boolean = false
     }
 
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        isAppInForeground = true
+    }
+
+    override fun onDestroy() {
+        isAppInForeground = false
+        super.onDestroy()
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 

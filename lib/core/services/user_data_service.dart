@@ -213,6 +213,17 @@ class UserDataService {
         'pronunciation_score': pronunciationScore,
       });
 
+      // 3. Insert companion response message
+      if (translatedText.isNotEmpty) {
+        await client.from('messages').insert({
+          'conversation_id': convId,
+          'user_id': uid,
+          'sender_role': 'pet',
+          'source_text': sourceText,
+          'translated_text': translatedText,
+        });
+      }
+
       return convId;
     } catch (e) {
       debugPrint('Error recording conversation: $e');

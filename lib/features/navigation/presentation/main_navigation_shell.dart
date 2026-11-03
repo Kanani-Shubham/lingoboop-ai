@@ -176,10 +176,11 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
   }
 
   void _openCard(double screenWidth) {
+    _isCustomPositioned = false;
     _side = (_petPos.dx + 75.0 < screenWidth / 2.0) ? 'r' : 'l';
     _tx = (_side == 'r') ? -24.0 : (screenWidth - 126.0);
     setState(() {
-      _petPos = Offset(_tx, _petPos.dy);
+      _petPos = Offset(_tx, _floor(MediaQuery.of(context).size.height));
     });
     ref.read(companionProvider.notifier).setPetMode('talk');
     ref.read(companionProvider.notifier).openCard();
@@ -211,10 +212,11 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
 
     ref.listen<CompanionState>(companionProvider, (previous, current) {
       if (current.isCardOpen && !(previous?.isCardOpen ?? false)) {
+        _isCustomPositioned = false;
         _side = (_petPos.dx + 75.0 < screenW / 2.0) ? 'r' : 'l';
         _tx = (_side == 'r') ? -24.0 : (screenW - 126.0);
         setState(() {
-          _petPos = Offset(_tx, _petPos.dy);
+          _petPos = Offset(_tx, _floor(screenH));
           _facing = (_side == 'r') ? 0.9 : -0.9;
         });
       } else if (!current.isCardOpen && (previous?.isCardOpen ?? false)) {

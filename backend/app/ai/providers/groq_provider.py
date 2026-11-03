@@ -5,6 +5,18 @@ from fastapi import HTTPException, status
 from app.core.config import settings
 from app.ai.providers.base_provider import BaseLLMProvider
 
+_SHARED_GROQ_CLIENT: Optional[httpx.AsyncClient] = None
+
+
+def _get_shared_groq_client(timeout: float) -> httpx.AsyncClient:
+    global _SHARED_GROQ_CLIENT
+    if _SHARED_GROQ_CLIENT is None or _SHARED_GROQ_CLIENT.is_closed:
+        _SHARED_GROQ_CLIENT = httpx.AsyncClient(
+            timeout=timeout,
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=50)
+        )
+    return _SHARED_GROQ_CLIENT
+
 
 class GroqProvider(BaseLLMProvider):
     """
@@ -61,12 +73,12 @@ class GroqProvider(BaseLLMProvider):
             payload["response_format"] = response_format
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    self.endpoint_url,
-                    headers=headers,
-                    json=payload,
-                )
+            client = _get_shared_groq_client(self.timeout)
+            response = await client.post(
+                self.endpoint_url,
+                headers=headers,
+                json=payload,
+            )
 
             if response.status_code == 401 or response.status_code == 403:
                 raise HTTPException(
