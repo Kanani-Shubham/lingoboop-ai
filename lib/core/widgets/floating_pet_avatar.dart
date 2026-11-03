@@ -117,39 +117,42 @@ class _FloatingPetAvatarState extends State<FloatingPetAvatar> {
     }
   }
 
-  double _totalPanDistance = 0.0;
-  bool _isDragging = false;
+  Offset? _pointerStart;
+  bool _hasMoved = false;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return Listener(
       behavior: HitTestBehavior.opaque,
-      onPanDown: (details) {
-        _totalPanDistance = 0.0;
-        _isDragging = false;
+      onPointerDown: (event) {
+        _pointerStart = event.position;
+        _hasMoved = false;
       },
-      onPanUpdate: (details) {
-        _totalPanDistance += details.delta.distance;
-        if (_totalPanDistance > 6.0) {
-          _isDragging = true;
-          widget.onDragUpdate(details.delta);
+      onPointerMove: (event) {
+        if (_pointerStart == null) return;
+        final delta = event.position - _pointerStart!;
+        if (!_hasMoved && delta.distance > 6.0) {
+          _hasMoved = true;
+        }
+        if (_hasMoved) {
+          widget.onDragUpdate(event.delta);
         }
       },
-      onPanEnd: (_) {
-        if (_isDragging) {
+      onPointerUp: (event) {
+        if (_hasMoved) {
           widget.onDragEnd();
         } else {
           widget.onTap();
         }
-        _isDragging = false;
-        _totalPanDistance = 0.0;
+        _pointerStart = null;
+        _hasMoved = false;
       },
-      onPanCancel: () {
-        if (_isDragging) {
+      onPointerCancel: (event) {
+        if (_hasMoved) {
           widget.onDragEnd();
         }
-        _isDragging = false;
-        _totalPanDistance = 0.0;
+        _pointerStart = null;
+        _hasMoved = false;
       },
       child: Container(
         width: widget.size,

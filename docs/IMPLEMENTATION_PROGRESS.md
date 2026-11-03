@@ -93,13 +93,14 @@ All critical user-reported issues from physical Android 14 device testing have b
 | Test Suite | Commands Executed | Result | Details |
 |---|---|---|---|
 | **Flutter Linter & Analyzer** | `flutter analyze` | **PASS (0 issues)** | Zero errors, warnings, or hints across entire `lib/` |
-| **Flutter Unit & Widget Tests** | `flutter test` | **PASS (20/20)** | All 20 tests pass, including new `PronunciationScorer` tests |
+| **Flutter Unit & Widget Tests** | `flutter test` | **PASS (21/21)** | All 21 tests pass, including pet gravity physics tests |
+| **In-App Gravity & Tap/Drag Test** | `flutter test test/pet_gravity_physics_test.dart` | **PASS (1/1)** | Tap opens card, drag closes card, vertical fall under gravity, floor landing |
 | **Pronunciation Scorer Unit Tests** | `flutter test test/pronunciation_scorer_test.dart` | **PASS (5/5)** | Exact match, partial match, empty speech, punctuation, Gujarati script |
 | **Backend Daily Practice & AI Tests** | `pytest backend/tests/test_daily_practice.py` | **PASS (3/3)** | Authenticated endpoint, unauthenticated rejection, AI generation |
 | **Backend Translation & Fallback Tests**| `pytest backend/tests/test_translation.py` | **PASS (4/4)** | Phrase cache, identity check, Groq fallback, auth rejection |
 | **Backend JWT Security & RLS Tests** | `pytest backend/tests/test_jwt_security.py` | **PASS (8/8)** | Valid token, expired, forged signature, wrong aud, missing claims |
 | **Full Backend Test Suite** | `pytest backend/tests/ -v` | **PASS (43/43)** | 100% of all 43 tests passing in 49.44s |
-| **Android Debug APK Build** | `flutter build apk --debug` | **PASS** | `app-debug.apk` built successfully in 54.1s |
+| **Android Debug APK Build** | `flutter build apk --debug` | **PASS** | `app-debug.apk` built successfully in 40.0s |
 | **FastAPI Backend Server** | `uvicorn app.main:app --port 8000` | **HEALTHY** | Running on `http://0.0.0.0:8000`, `/health` returns `success: true` |
 
 ---
@@ -122,4 +123,23 @@ The Flutter mobile implementation matches the primary reference prototype `produ
    - Automatic synthesized voice playback with Gnani Timbre TTS (with 120ms lead-in silence).
    - Mode shifts: `'listen'` while recording, `'think'` during translation, `'talk'` during voice playback, then returns to `'idle'`.
    - Typed sentence input executes identical translation and automatic TTS playback flow, floating above the Android on-screen keyboard.
+
+---
+
+## 5. Distinct Pet Experiences: In-App Gravity vs. Protected External Floating Overlay
+
+The architecture maintains strict separation between the two companion environments:
+
+| Requirement | In-App Flutter Pet | External Android Floating Pet |
+|---|---|---|
+| **Draggable Anywhere** | Yes (all directions within content viewport) | Yes (freely across full screen over any Android app) |
+| **Gravity on Release** | **YES** (`y += (floor - y) * min(1, dt * 7)`) | **NO** (Zero gravity, stays exactly at release coordinate) |
+| **Vertical Fall to Floor** | **YES** (falls straight down, lands at `floor()`) | **NO** (does not fall, stays at top/middle/bottom) |
+| **Landing Transition** | Smooth deceleration -> `mode('idle', 1500)` | Immediate rest at drop point |
+| **Edge Snapping** | None (preserves user-selected X position) | None (freely positionable anywhere) |
+| **Position Persistence** | Session ground position, respects system safe areas | `SharedPreferences` saves exact `pos_x` and `pos_y` |
+| **Tap vs Drag** | 6px threshold: `< 6px` toggles PolyCard, `> 6px` drags | 6px threshold: `< 6px` opens native overlay panel, `> 6px` drags |
+| **MainActivity Foregrounding** | N/A (runs inside in-app navigation shell) | **Never** brings MainActivity to foreground on tap |
+| **Native Components** | Pure Flutter `Listener` + `Ticker` frame physics | Protected: `FloatingPetService.kt`, `FloatingPetWindowManager.kt` |
+
 

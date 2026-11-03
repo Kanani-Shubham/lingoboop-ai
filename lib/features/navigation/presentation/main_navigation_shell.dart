@@ -5,7 +5,6 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/services/overlay_service.dart';
-import '../../../core/services/user_data_service.dart';
 import '../../../core/widgets/floating_pet_avatar.dart';
 import '../../../core/widgets/polypet_bottom_nav.dart';
 import '../../achievements/presentation/achievements_screen.dart';
@@ -32,7 +31,7 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
   double _facing = 0.5;
   String _side = 'r';
   bool _hasTappedPet = false;
-  bool _isCustomPositioned = false;
+  bool _isUserDragging = false;
 
   late Ticker _ticker;
   Duration _lastElapsed = Duration.zero;
@@ -51,7 +50,6 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
     super.initState();
     _ticker = createTicker(_onTick)..start();
     _initOverlayListener();
-    _restoreSavedPosition();
   }
 
   void _initOverlayListener() {
@@ -69,29 +67,6 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
     } catch (_) {}
   }
 
-  Future<void> _restoreSavedPosition() async {
-    try {
-      final prefs = await UserDataService.instance.getPreferences();
-      if (prefs != null && mounted) {
-        final normX = (prefs['overlay_position_x'] as num?)?.toDouble();
-        final normY = (prefs['overlay_position_y'] as num?)?.toDouble();
-        if (normX != null && normY != null) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            final size = MediaQuery.of(context).size;
-            final restoredX = (normX * size.width).clamp(-30.0, size.width - 120.0);
-            final restoredY = (normY * size.height).clamp(40.0, size.height - 180.0);
-            setState(() {
-              _petPos = Offset(restoredX, restoredY);
-              _side = (restoredX + 75.0 < size.width / 2.0) ? 'r' : 'l';
-              _isCustomPositioned = true;
-            });
-          });
-        }
-      }
-    } catch (_) {}
-  }
-
   @override
   void dispose() {
     _ticker.dispose();
@@ -101,8 +76,9 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
 
   int get _nowMs => DateTime.now().millisecondsSinceEpoch;
 
-  double _floor(double screenHeight) =>
-      (screenHeight - 64.0 - 34.0 - 150.0).clamp(100.0, screenHeight - 248.0);
+  /// Floor baseline calculation matching prototype floor() = Hh - 64 - 112
+  double _floor(double screenHeight, double bottomInset) =>
+      (screenHeight - 64.0 - bottomInset - 112.0).clamp(100.0, screenHeight - 160.0);
 
   void _onTick(Duration elapsed) {
     if (!mounted) return;
@@ -113,7 +89,8 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
     final size = MediaQuery.of(context).size;
     final screenW = size.width;
     final screenH = size.height;
-    final floorY = _floor(screenH);
+    final bottomInset = MediaQuery.of(context).padding.bottom;
+    final floorY = _floor(screenH, bottomInset);
     final companionState = ref.read(companionProvider);
     final isCardOpen = companionState.isCardOpen;
     final currentMode = companionState.petMode;
@@ -122,14 +99,24 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
     double newX = _petPos.dx;
     double newY = _petPos.dy;
 
-    // Gravity: smoothly pull back down to floor on initial placement before user moves it
-    if (!_isCustomPositioned && currentMode != 'drag') {
+    // Gravity: smoothly pull back down to floor whenever user is not actively dragging
+    if (!_isUserDragging) {
       newY += (floorY - newY) * math.min(1.0, dt * 7.0);
       if ((newY - _petPos.dy).abs() > 0.05) needsUpdate = true;
+
+      // Landing detection: when falling in 'drag' mode and within 3px of floor
+      if ((floorY - newY).abs() < 3.0) {
+        newY = floorY;
+        if (currentMode == 'drag') {
+          ref.read(companionProvider.notifier).setPetMode('idle');
+          _until = _nowMs + 1500;
+        }
+        if ((newY - _petPos.dy).abs() > 0.05) needsUpdate = true;
+      }
     }
 
     // Walking physics towards target tx
-    if (currentMode == 'walk') {
+    if (currentMode == 'walk' && !_isUserDragging) {
       final d = _tx - newX;
       if (d.abs() < 4.0 || _nowMs > _until) {
         newX = _tx;
@@ -145,7 +132,7 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
     }
     // Autonomous roaming when idle & card closed & not dragging
     else if (!isCardOpen &&
-        currentMode != 'drag' &&
+        !_isUserDragging &&
         (currentMode == 'idle' || currentMode == 'dance') &&
         _nowMs > _until) {
       final r = _random.nextDouble();
@@ -178,7 +165,6 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
   }
 
   void _openCard(double screenWidth) {
-    _isCustomPositioned = false;
     _side = (_petPos.dx + 75.0 < screenWidth / 2.0) ? 'r' : 'l';
     _tx = (_side == 'r') ? -24.0 : (screenWidth - 126.0);
     ref.read(companionProvider.notifier).setPetMode('walk');
@@ -210,10 +196,11 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
     final size = MediaQuery.of(context).size;
     final screenW = size.width;
     final screenH = size.height;
+    final bottomInset = MediaQuery.of(context).padding.bottom;
+    final floorY = _floor(screenH, bottomInset);
 
     ref.listen<CompanionState>(companionProvider, (previous, current) {
       if (current.isCardOpen && !(previous?.isCardOpen ?? false)) {
-        _isCustomPositioned = false;
         _side = (_petPos.dx + 75.0 < screenW / 2.0) ? 'r' : 'l';
         _tx = (_side == 'r') ? -24.0 : (screenW - 126.0);
         notifier.setPetMode('walk');
@@ -226,7 +213,7 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
     });
 
     if (_petPos.dy == 520.0 && screenH > 0) {
-      _petPos = Offset(_petPos.dx, _floor(screenH));
+      _petPos = Offset((screenW - 150.0) / 2.0, floorY);
     }
 
     return Scaffold(
@@ -266,7 +253,7 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
               child: const LingoCardWidget(),
             ),
 
-          // 4. Persistent Draggable Floating 3D Pet Companion across ALL tabs
+          // 4. Persistent Draggable Floating 3D Pet Companion across ALL tabs with Gravity Physics
           Positioned(
             left: _petPos.dx,
             top: _petPos.dy,
@@ -283,9 +270,9 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
                 if (companionState.isCardOpen) {
                   _closeCard();
                 }
-                _isCustomPositioned = true;
-                final newX = (_petPos.dx + delta.dx).clamp(-30.0, screenW - 120.0);
-                final newY = (_petPos.dy + delta.dy).clamp(40.0, screenH - 180.0);
+                _isUserDragging = true;
+                final newX = (_petPos.dx + delta.dx).clamp(-40.0, screenW - 110.0);
+                final newY = (_petPos.dy + delta.dy).clamp(0.0, floorY);
                 final newSide = (newX + 75.0 < screenW / 2.0) ? 'r' : 'l';
                 setState(() {
                   _petPos = Offset(newX, newY);
@@ -295,14 +282,16 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
                 notifier.setPetMode('drag');
               },
               onDragEnd: () {
-                notifier.finishPetDrag();
-                if (screenW > 0 && screenH > 0) {
-                  final normX = (_petPos.dx / screenW).clamp(0.0, 1.0);
-                  final normY = (_petPos.dy / screenH).clamp(0.0, 1.0);
-                  UserDataService.instance.savePreferences(
-                    overlayPositionX: normX,
-                    overlayPositionY: normY,
-                  );
+                _isUserDragging = false;
+                final currentFloor = _floor(screenH, MediaQuery.of(context).padding.bottom);
+                if ((currentFloor - _petPos.dy).abs() < 3.0) {
+                  setState(() {
+                    _petPos = Offset(_petPos.dx, currentFloor);
+                  });
+                  notifier.setPetMode('idle');
+                  _until = _nowMs + 1500;
+                } else {
+                  setState(() {}); // Immediately schedule next frame for ticker to run gravity fall!
                 }
               },
             ),
