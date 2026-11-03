@@ -22,8 +22,26 @@ void main() {
       expect(state.activePet.accentColor, AppColors.foxMaru);
       expect(state.sourceLanguage.code, 'gu');
       expect(state.targetLanguage.code, 'en');
+      expect(state.selectedVoice, 'Shivani');
       expect(state.isCardOpen, isFalse);
       expect(state.isListening, isFalse);
+    });
+
+    test('Selecting voice character updates selectedVoice and preserves independence from pet', () {
+      expect(notifier.state.selectedVoice, 'Shivani');
+      notifier.setTtsVoice('Avinash');
+      expect(notifier.state.selectedVoice, 'Avinash');
+
+      // Changing pet must NOT alter or reset selected voice
+      notifier.setPet('panda');
+      expect(notifier.state.activePet.name, 'Pano');
+      expect(notifier.state.selectedVoice, 'Avinash');
+
+      notifier.setTtsVoice('Shubham');
+      expect(notifier.state.selectedVoice, 'Shubham');
+      notifier.setPet('leo');
+      expect(notifier.state.activePet.name, 'Leo');
+      expect(notifier.state.selectedVoice, 'Shubham');
     });
 
     test('Switching pet updates activePet and dynamic theme accent', () {

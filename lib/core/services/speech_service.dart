@@ -381,6 +381,117 @@ class SpeechService {
     return null;
   }
 
+  static const List<Map<String, dynamic>> defaultVoiceCatalog = [
+    {
+      'id': 'Shivani',
+      'name': 'Shivani',
+      'gender': 'female',
+      'description': 'Natural, warm, expressive (Default)',
+      'model': 'timbre-v3.0',
+    },
+    {
+      'id': 'Chetana',
+      'name': 'Chetana',
+      'gender': 'female',
+      'description': 'Bright, articulate, cheerful',
+      'model': 'timbre-v3.0',
+    },
+    {
+      'id': 'Kalpana',
+      'name': 'Kalpana',
+      'gender': 'female',
+      'description': 'Soothing, gentle, melodic',
+      'model': 'timbre-v3.0',
+    },
+    {
+      'id': 'Lakshmi',
+      'name': 'Lakshmi',
+      'gender': 'female',
+      'description': 'Clear, classic, professional',
+      'model': 'timbre-v3.0',
+    },
+    {
+      'id': 'Riyaa',
+      'name': 'Riyaa',
+      'gender': 'female',
+      'description': 'Lively, playful, enthusiastic',
+      'model': 'timbre-v3.0',
+    },
+    {
+      'id': 'Tarika',
+      'name': 'Tarika',
+      'gender': 'female',
+      'description': 'Crisp, modern, pleasant',
+      'model': 'timbre-v3.0',
+    },
+    {
+      'id': 'Vasudha',
+      'name': 'Vasudha',
+      'gender': 'female',
+      'description': 'Rich, melodic, comforting',
+      'model': 'timbre-v3.0',
+    },
+    {
+      'id': 'Avinash',
+      'name': 'Avinash',
+      'gender': 'male',
+      'description': 'Warm, friendly, confident',
+      'model': 'timbre-v3.0',
+    },
+    {
+      'id': 'Devansh',
+      'name': 'Devansh',
+      'gender': 'male',
+      'description': 'Youthful, energetic, bright',
+      'model': 'timbre-v3.0',
+    },
+    {
+      'id': 'Prakash',
+      'name': 'Prakash',
+      'gender': 'male',
+      'description': 'Clear, mature, reassuring',
+      'model': 'timbre-v3.0',
+    },
+    {
+      'id': 'Shubham',
+      'name': 'Shubham',
+      'gender': 'male',
+      'description': 'Natural, casual, conversational',
+      'model': 'timbre-v3.0',
+    },
+    {
+      'id': 'Yashraj',
+      'name': 'Yashraj',
+      'gender': 'male',
+      'description': 'Expressive, dynamic',
+      'model': 'timbre-v3.0',
+    },
+    {
+      'id': 'Harshad',
+      'name': 'Harshad',
+      'gender': 'male',
+      'description': 'Deep, authoritative, calm',
+      'model': 'timbre-v3.0',
+    },
+  ];
+
+  /// Fetches verified voice catalog from backend API or falls back to default catalog
+  Future<List<Map<String, dynamic>>> fetchVoiceCatalog() async {
+    try {
+      final url = Uri.parse('$_backendBaseUrl/api/v1/tts/voices');
+      final resp = await http.get(url, headers: _buildHeaders()).timeout(const Duration(seconds: 8));
+      if (resp.statusCode == 200) {
+        final decoded = jsonDecode(resp.body) as Map<String, dynamic>;
+        if (decoded['success'] == true && decoded['data'] is List) {
+          return List<Map<String, dynamic>>.from(decoded['data']);
+        }
+      }
+    } catch (e) {
+      debugPrint('[SpeechService] Error fetching voice catalog: $e');
+    }
+    return defaultVoiceCatalog;
+  }
+
   /// Ensures raw PCM audio is wrapped in a standard 44-byte WAV header if not already present
   Uint8List _wrapPcmAsWav(Uint8List pcmBytes, {int sampleRate = 16000, int channels = 1, int bitsPerSample = 16}) {
     if (pcmBytes.length >= 4 &&

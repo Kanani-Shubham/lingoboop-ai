@@ -43,6 +43,7 @@ class OverlayService {
     required String petColorHex,
     required String sourceLang,
     required String targetLang,
+    String? voice,
     String? authToken,
   }) async {
     if (!Platform.isAndroid) return false;
@@ -54,6 +55,7 @@ class OverlayService {
         'petColor': petColorHex,
         'sourceLang': sourceLang,
         'targetLang': targetLang,
+        'voice': voice ?? 'Shivani',
         'authToken': ?token,
       });
       return res ?? false;
@@ -130,6 +132,18 @@ class OverlayService {
       });
     } catch (e) {
       debugPrint('Error updating auth token in overlay: $e');
+    }
+  }
+
+  /// Update TTS voice character in running native overlay
+  Future<void> updateVoice(String voice) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod('updateVoice', {
+        'voice': voice,
+      });
+    } catch (e) {
+      debugPrint('Error updating voice in overlay: $e');
     }
   }
 }

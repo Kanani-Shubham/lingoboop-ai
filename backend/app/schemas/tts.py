@@ -26,3 +26,19 @@ class TTSResponseMetadata(BaseModel):
     voice: str
     model: str
     language: str
+
+
+class VoiceItem(BaseModel):
+    id: str
+    name: str
+    gender: str
+    model: str = "timbre-v3.0"
+    description: str
+    supported_languages: list[str] = [
+        "hi-IN", "en-IN", "gu-IN", "mr-IN", "ta-IN", "te-IN", "kn-IN", "bn-IN"
+    ]
+    sample_text_by_lang: dict[str, str] = {
+        "en-IN": "Hello! I am your AI language companion. Nice to meet you!",
+        "gu-IN": "નમસ્તે! હું તમારો ભાષા સાથી છું. તમને મળીને આનંદ થયો!",
+        "hi-IN": "नमस्ते! मैं आपका भाषा साथी हूँ। आपसे मिलकर बहुत खुशी हुई!",
+    }

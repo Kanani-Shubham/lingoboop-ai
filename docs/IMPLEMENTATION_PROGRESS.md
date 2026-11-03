@@ -1,8 +1,8 @@
 # LingoBoop — Master Implementation Progress Report
 
-**Document Version:** 3.0.0  
+**Document Version:** 3.1.0  
 **Date:** November 3, 2026  
-**Current Milestone:** All Critical Voice, Translation, Assessment & Floating UI Repairs Verified  
+**Current Milestone:** Gnani Timbre v3.0 TTS Integration, Voice Character Settings & Multi-Surface Synchronization Completed  
 **Lead Engineer / Role:** Principal Software Architect, Android Native Engineer (Kotlin), Flutter Lead, FastAPI Backend Engineer, AI/ML Engineer, QA Lead  
 **Git Checkpoint:** Branch `main`  
 
@@ -13,13 +13,15 @@
 This document serves as the master tracking record for the end-to-end engineering repair, implementation, and production hardening of **LingoBoop — AI Language Pet**.
 
 All critical user-reported issues from physical Android 14 device testing have been diagnosed to their root causes, permanently repaired in the codebase, and verified with automated test suites:
-- **Flutter In-App PolyCard Overflow:** Resolved. The 23-pixel right overflow on the controls row is completely eliminated via responsive container constraints (`240dp - 285dp`) and flexible scrollable/fitted child wrappers.
-- **Duplicate Pets on Profile / Navigation:** Resolved. The native Android overlay now synchronizes with the Flutter app lifecycle, collapsing to `0x0` dimensions, `alpha = 0.0f`, `FLAG_NOT_TOUCHABLE`, and cancelling all autonomous roaming while LingoBoop is in the foreground.
-- **Translation Echoing Raw Source Text:** Resolved. Native Android overlay now receives and passes the Supabase JWT `Authorization: Bearer <token>` header, authenticating with `/api/v1/ai/tutor`. If AI tutor fails or returns the source text, it automatically falls back to Groq `openai/gpt-oss-120b` via `/api/v1/translation/translate`. If both fail, it displays a clear retry message and never presents untranslated source text as the translation.
-- **External Floating Card Mic Button Clipping:** Resolved. Native WindowManager card width was increased to a responsive `76%` of display width (`270dp - 296dp`), pill button horizontal padding optimized to `7dp`, and controls row margins adjusted so the 38dp mic button has complete padding and is never clipped.
-- **Incomplete First-Word Audio Pronunciation:** Resolved. Implemented `_prependSilenceToWav` in `SpeechService.dart`, prepending 120ms of silent PCM samples to the RIFF WAVE data so that Android hardware audio DAC ramp-up occurs during silence, eliminating first-syllable truncation.
-- **Pronunciation Assessment & 0% Matched Bug:** Resolved. Built `PronunciationScorer` with token normalization (punctuation removal, lowercase, unicode trimming) and Levenshtein distance matrix sequence alignment. Empty or uncaptured speech is now gracefully handled as `"Could not capture clear speech. Tap mic to try again."` without assigning a 0% match score.
-- **AI-Powered Daily Speaking Practice:** Implemented. Created `POST /api/v1/ai/daily-practice` backend endpoint powered by Groq (`openai/gpt-oss-120b`) and a new interactive Flutter screen (`DailySpeakingPracticeScreen`) accessible directly by tapping the Daily Speech Practice card on the home screen.
+- **Gnani Timbre v3.0 Text-to-Speech (TTS):** Resolved. Fixed raw linear PCM byte parsing by synthesizing and prepending a 44-byte canonical RIFF/WAVE container header on both backend and Flutter client. Translated text now speaks reliably with Play, Slow (0.75x), and Repeat actions in both in-app and floating PolyCards.
+- **Voice Character Selection in Settings (New Feature):** Implemented. Added a dedicated Voice Character section in `SettingsScreen` featuring 13 verified Gnani Timbre v3.0 voices with gender badges, tonal descriptions, active selection indicators, demo language selector, and interactive "Play Demo" preview buttons.
+- **Voice Preference Persistence & Synchronization:** Implemented. Selected voice persists locally in `UserDataService` (`FlutterSecureStorage`) and Supabase (`user_preferences.tts_voice`), syncs with `CompanionState.selectedVoice`, and communicates across MethodChannel to the native Android overlay (`FloatingPetWindowManager.updateVoice`).
+- **Independence of Pet and Voice:** Verified. Changing visual pets (Maru, Mimi, Bun, Pano, Pip, Leo) never resets or changes the active voice character, and changing the voice character never alters the active 3D pet companion.
+- **3D Companion Pet Visual Rendering:** Resolved. Replaced external texture references with 6 self-contained embedded base64 glTF models in `assets/web/models_data.js` for all canonical names and aliases, and enabled `allowFileAccessFromFileURLs` and `allowUniversalAccessFromFileURLs` in Android WebView. All 6 pets render seamlessly in both Flutter and the floating overlay.
+- **In-App Gravity Cold-Start Physics:** Resolved. Pet initializes centered and smoothly settles to the floor from frame 1 via post-frame scheduling, maintaining horizontal position on release without snapping to edges. The external floating pet retains zero gravity.
+- **Zero-Occlusion PolyCard Docking:** Resolved. Floating PolyCard docks cleanly beside the pet (`dpToPx(-24)` on left or `screenWidth - dpToPx(126)` on right) with the pet facing the card, eliminating visual overlap.
+- **Pronunciation Assessment & Daily Speaking Practice:** Preserved and protected. Existing Levenshtein sequence alignment scoring, tokenization, and Groq daily practice remain 100% operational.
+
 
 ---
 

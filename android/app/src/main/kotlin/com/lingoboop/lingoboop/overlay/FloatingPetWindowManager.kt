@@ -51,6 +51,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
     private var petAccentColor: Int = Color.parseColor("#c4571c")
     private var sourceLanguage: String = "gu-IN"
     private var targetLanguage: String = "en-US"
+    private var selectedVoice: String = "Shivani"
     private var authToken: String? = null
     private var savedPetXBeforePanel: Int? = null
 
@@ -97,7 +98,13 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
         }
         sourceLanguage = prefs.getString("source_lang", "gu-IN") ?: "gu-IN"
         targetLanguage = prefs.getString("target_lang", "en-US") ?: "en-US"
+        selectedVoice = prefs.getString("selected_tts_voice", "Shivani") ?: "Shivani"
         authToken = prefs.getString("auth_token", null)
+    }
+
+    fun updateVoice(voice: String) {
+        selectedVoice = voice
+        prefs.edit().putString("selected_tts_voice", voice).apply()
     }
 
     fun updateAuthToken(token: String?) {
@@ -996,6 +1003,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
 
                     val payload = org.json.JSONObject().apply {
                         put("text", phrase)
+                        put("voice", selectedVoice)
                         put("language", targetLanguage)
                         put("speed", rate.toDouble())
                     }

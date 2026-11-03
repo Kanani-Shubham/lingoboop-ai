@@ -121,6 +121,7 @@ class MainActivity : FlutterActivity() {
                     val petColor = call.argument<String>("petColor") ?: "#c4571c"
                     val sourceLang = call.argument<String>("sourceLang") ?: "gu-IN"
                     val targetLang = call.argument<String>("targetLang") ?: "en-US"
+                    val voice = call.argument<String>("voice") ?: "Shivani"
                     val authToken = call.argument<String>("authToken")
 
                     val intent = Intent(this, FloatingPetService::class.java).apply {
@@ -130,6 +131,7 @@ class MainActivity : FlutterActivity() {
                         putExtra(FloatingPetService.EXTRA_PET_COLOR, petColor)
                         putExtra(FloatingPetService.EXTRA_SOURCE_LANG, sourceLang)
                         putExtra(FloatingPetService.EXTRA_TARGET_LANG, targetLang)
+                        putExtra(FloatingPetService.EXTRA_VOICE, voice)
                         if (authToken != null) {
                             putExtra(FloatingPetService.EXTRA_AUTH_TOKEN, authToken)
                         }
@@ -191,6 +193,15 @@ class MainActivity : FlutterActivity() {
                         if (authToken != null) {
                             putExtra(FloatingPetService.EXTRA_AUTH_TOKEN, authToken)
                         }
+                    }
+                    startService(intent)
+                    result.success(true)
+                }
+                "updateVoice" -> {
+                    val voice = call.argument<String>("voice") ?: "Shivani"
+                    val intent = Intent(this, FloatingPetService::class.java).apply {
+                        action = FloatingPetService.ACTION_UPDATE_VOICE
+                        putExtra(FloatingPetService.EXTRA_VOICE, voice)
                     }
                     startService(intent)
                     result.success(true)

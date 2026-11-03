@@ -1,10 +1,32 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/app_config.dart';
 
 class UserDataService {
   UserDataService._();
   static final UserDataService instance = UserDataService._();
+
+  final _storage = const FlutterSecureStorage();
+  String _cachedVoice = 'Shivani';
+
+  Future<String> getSelectedVoice() async {
+    try {
+      final v = await _storage.read(key: 'selected_tts_voice');
+      if (v != null && v.isNotEmpty) {
+        _cachedVoice = v;
+        return v;
+      }
+    } catch (_) {}
+    return _cachedVoice;
+  }
+
+  Future<void> saveSelectedVoice(String voice) async {
+    _cachedVoice = voice;
+    try {
+      await _storage.write(key: 'selected_tts_voice', value: voice);
+    } catch (_) {}
+  }
 
   SupabaseClient? get _client {
     if (!AppConfig.isSupabaseConfigured) return null;

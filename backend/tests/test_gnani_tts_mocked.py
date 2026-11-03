@@ -79,3 +79,22 @@ async def test_tts_auth_failure_mocked():
         assert exc_info.value.status_code == 401
         assert exc_info.value.detail["error_code"] == "AUTHENTICATION_FAILED"
 
+
+@pytest.mark.asyncio
+async def test_tts_voice_catalog_endpoint():
+    from app.routers.tts import get_voice_catalog
+    resp = await get_voice_catalog()
+    assert resp.success is True
+    assert len(resp.data) == 13
+    voice_ids = [v["id"] for v in resp.data]
+    assert "Shivani" in voice_ids
+    assert "Avinash" in voice_ids
+    assert "Shubham" in voice_ids
+    assert "Lakshmi" in voice_ids
+    for v in resp.data:
+        assert v["model"] == "timbre-v3.0"
+        assert v["gender"] in ["male", "female"]
+        assert len(v["supported_languages"]) > 0
+        assert "en-IN" in v["sample_text_by_lang"]
+
+

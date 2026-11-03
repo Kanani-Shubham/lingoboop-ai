@@ -23,6 +23,7 @@ class FloatingPetService : Service() {
         const val ACTION_UPDATE_PET = "com.lingoboop.overlay.ACTION_UPDATE_PET"
         const val ACTION_UPDATE_LANGUAGES = "com.lingoboop.overlay.ACTION_UPDATE_LANGUAGES"
         const val ACTION_UPDATE_AUTH_TOKEN = "com.lingoboop.overlay.ACTION_UPDATE_AUTH_TOKEN"
+        const val ACTION_UPDATE_VOICE = "com.lingoboop.overlay.ACTION_UPDATE_VOICE"
 
         const val EXTRA_PET_KEY = "extra_pet_key"
         const val EXTRA_PET_NAME = "extra_pet_name"
@@ -30,6 +31,7 @@ class FloatingPetService : Service() {
         const val EXTRA_SOURCE_LANG = "extra_source_lang"
         const val EXTRA_TARGET_LANG = "extra_target_lang"
         const val EXTRA_AUTH_TOKEN = "extra_auth_token"
+        const val EXTRA_VOICE = "extra_voice"
 
         @Volatile
         var isRunning = false
@@ -72,10 +74,18 @@ class FloatingPetService : Service() {
                 val token = intent?.getStringExtra(EXTRA_AUTH_TOKEN)
                 windowManager?.updateAuthToken(token)
             }
+            ACTION_UPDATE_VOICE -> {
+                val voice = intent?.getStringExtra(EXTRA_VOICE) ?: "Shivani"
+                windowManager?.updateVoice(voice)
+            }
             ACTION_START -> {
                 val token = intent?.getStringExtra(EXTRA_AUTH_TOKEN)
                 if (token != null) {
                     windowManager?.updateAuthToken(token)
+                }
+                val voice = intent?.getStringExtra(EXTRA_VOICE)
+                if (voice != null) {
+                    windowManager?.updateVoice(voice)
                 }
                 val key = intent?.getStringExtra(EXTRA_PET_KEY)
                 val name = intent?.getStringExtra(EXTRA_PET_NAME)

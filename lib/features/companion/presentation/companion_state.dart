@@ -34,6 +34,7 @@ class CompanionState {
   final String? lastTtsPath;
   final String aiProvider;
   final List<Map<String, String>> conversationHistory;
+  final String selectedVoice;
 
   const CompanionState({
     required this.activePet,
@@ -59,6 +60,7 @@ class CompanionState {
     this.lastTtsPath,
     this.aiProvider = 'groq',
     this.conversationHistory = const [],
+    this.selectedVoice = 'Shivani',
   });
 
   CompanionState copyWith({
@@ -85,6 +87,7 @@ class CompanionState {
     String? lastTtsPath,
     String? aiProvider,
     List<Map<String, String>>? conversationHistory,
+    String? selectedVoice,
   }) {
     return CompanionState(
       activePet: activePet ?? this.activePet,
@@ -110,6 +113,7 @@ class CompanionState {
       lastTtsPath: lastTtsPath ?? this.lastTtsPath,
       aiProvider: aiProvider ?? this.aiProvider,
       conversationHistory: conversationHistory ?? this.conversationHistory,
+      selectedVoice: selectedVoice ?? this.selectedVoice,
     );
   }
 }
@@ -124,12 +128,23 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
           ),
         ) {
     SpeechService.instance.resolveBackendUrl();
+    UserDataService.instance.getSelectedVoice().then((voice) {
+      if (mounted) {
+        state = state.copyWith(selectedVoice: voice);
+      }
+    });
   }
 
   Timer? _karaokeTimer;
   Timer? _previewDebounceTimer;
   StreamSubscription? _liveSpeechSub;
   int _translationToken = 0;
+
+  void setTtsVoice(String voice) {
+    state = state.copyWith(selectedVoice: voice);
+    UserDataService.instance.saveSelectedVoice(voice);
+    OverlayService.instance.updateVoice(voice);
+  }
 
   void setPet(String petKey) {
     final pet = CharacterRegistry.getByKey(petKey);
@@ -471,6 +486,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     final textToSpeak = translated.isNotEmpty ? translated : (replyText ?? input);
     final ttsPath = await SpeechService.instance.synthesizeTTS(
       text: textToSpeak,
+      voice: state.selectedVoice,
       languageCode: state.targetLanguage.bcp47,
       speed: 1.0,
     );
@@ -508,6 +524,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
         state = state.copyWith(statusNote: 'Synthesizing voice…');
         SpeechService.instance.synthesizeTTS(
           text: textToSpeak,
+          voice: state.selectedVoice,
           languageCode: state.targetLanguage.bcp47,
           speed: 1.0,
         ).then((path) {
