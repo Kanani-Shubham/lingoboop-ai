@@ -14,10 +14,24 @@ _SHARED_CLIENT: Optional[httpx.AsyncClient] = None
 
 
 def _wrap_pcm_as_wav(pcm_bytes: bytes, sample_rate: int = 16000, num_channels: int = 1, bits_per_sample: int = 16) -> bytes:
-    """Wraps raw linear PCM audio bytes into a standard 44-byte WAV (RIFF/WAVE) container."""
-    if pcm_bytes.startswith(b"RIFF"):
-        return pcm_bytes
+    """Wraps raw linear PCM audio bytes into a standard 44-byte WAV (RIFF/WAVE) container,
+    and repairs Gnani's 0xFFFFFFFF streaming placeholder size fields so Android/ExoPlayer can decode and play the audio."""
     import struct
+    if pcm_bytes.startswith(b"RIFF"):
+        if len(pcm_bytes) >= 44:
+            data_idx = pcm_bytes.find(b"data")
+            if data_idx != -1 and data_idx + 8 <= len(pcm_bytes):
+                actual_data_size = len(pcm_bytes) - (data_idx + 8)
+                actual_riff_size = len(pcm_bytes) - 8
+                existing_riff_size = struct.unpack("<I", pcm_bytes[4:8])[0]
+                existing_data_size = struct.unpack("<I", pcm_bytes[data_idx+4:data_idx+8])[0]
+                if existing_riff_size in (0, 0xFFFFFFFF) or existing_data_size in (0, 0xFFFFFFFF) or existing_data_size > len(pcm_bytes):
+                    ba = bytearray(pcm_bytes)
+                    struct.pack_into("<I", ba, 4, actual_riff_size)
+                    struct.pack_into("<I", ba, data_idx + 4, actual_data_size)
+                    return bytes(ba)
+        return pcm_bytes
+
     byte_rate = sample_rate * num_channels * (bits_per_sample // 8)
     block_align = num_channels * (bits_per_sample // 8)
     data_size = len(pcm_bytes)

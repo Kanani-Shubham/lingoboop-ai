@@ -345,6 +345,7 @@ class SpeechService {
     String languageCode = 'en-IN',
     double speed = 1.0,
   }) async {
+    debugPrint('[SpeechService] TTS request started: text="$text", voice=$voice, lang=$languageCode, speed=$speed');
     try {
       final url = Uri.parse('$_backendBaseUrl/api/v1/tts/synthesize');
       final resp = await http
@@ -361,6 +362,7 @@ class SpeechService {
           )
           .timeout(const Duration(seconds: 15));
 
+      debugPrint('[SpeechService] TTS response received: status=${resp.statusCode}');
       if (resp.statusCode == 200) {
         final decoded = jsonDecode(resp.body) as Map<String, dynamic>;
         if (decoded['success'] == true && decoded['data'] != null) {
@@ -373,10 +375,12 @@ class SpeechService {
             final filePath = '${tempDir.path}/lingo_tts_${DateTime.now().millisecondsSinceEpoch}.wav';
             final ttsFile = File(filePath);
             await ttsFile.writeAsBytes(paddedBytes);
-            debugPrint('[SpeechService] TTS synthesized saved to $filePath (${paddedBytes.length} bytes)');
+            debugPrint('[SpeechService] Audio file successfully written: $filePath (${paddedBytes.length} bytes)');
             return filePath;
           }
         }
+      } else {
+        debugPrint('[SpeechService] TTS request failed with HTTP ${resp.statusCode}: ${resp.body}');
       }
     } catch (e) {
       debugPrint('[SpeechService] TTS synthesis exception: $e');
@@ -496,14 +500,42 @@ class SpeechService {
   }
 
   /// Ensures raw PCM audio is wrapped in a standard 44-byte WAV header if not already present
-  Uint8List _wrapPcmAsWav(Uint8List pcmBytes, {int sampleRate = 16000, int channels = 1, int bitsPerSample = 16}) {
-    if (pcmBytes.length >= 4 &&
+  Uint8List _wrapPcmAsWav(
+    Uint8List pcmBytes, {
+    int sampleRate = 16000,
+    int channels = 1,
+    int bitsPerSample = 16,
+  }) {
+    if (pcmBytes.length >= 44 &&
         pcmBytes[0] == 0x52 &&
         pcmBytes[1] == 0x49 &&
         pcmBytes[2] == 0x46 &&
         pcmBytes[3] == 0x46) {
+      int dataIdx = -1;
+      for (int i = 12; i < pcmBytes.length - 8; i++) {
+        if (pcmBytes[i] == 0x64 &&
+            pcmBytes[i + 1] == 0x61 &&
+            pcmBytes[i + 2] == 0x74 &&
+            pcmBytes[i + 3] == 0x61) {
+          dataIdx = i;
+          break;
+        }
+      }
+      if (dataIdx != -1 && dataIdx + 8 <= pcmBytes.length) {
+        final byteData = ByteData.sublistView(pcmBytes);
+        final riffSize = byteData.getUint32(4, Endian.little);
+        final dataSize = byteData.getUint32(dataIdx + 4, Endian.little);
+        if (riffSize == 0xFFFFFFFF || riffSize == 0 || dataSize == 0xFFFFFFFF || dataSize == 0 || dataSize > pcmBytes.length) {
+          final out = Uint8List.fromList(pcmBytes);
+          final outData = ByteData.sublistView(out);
+          outData.setUint32(4, pcmBytes.length - 8, Endian.little);
+          outData.setUint32(dataIdx + 4, pcmBytes.length - (dataIdx + 8), Endian.little);
+          return out;
+        }
+      }
       return pcmBytes;
     }
+
     final byteRate = sampleRate * channels * (bitsPerSample ~/ 8);
     final blockAlign = channels * (bitsPerSample ~/ 8);
     final dataSize = pcmBytes.length;
@@ -575,8 +607,14 @@ class SpeechService {
     final bytesPerMs = ((safeSampleRate * safeChannels * (safeBits ~/ 8)) / 1000.0).round();
     final silenceBytesCount = bytesPerMs * silenceMs;
 
-    final oldDataSize = byteData.getUint32(dataIndex + 4, Endian.little);
-    final oldRiffSize = byteData.getUint32(4, Endian.little);
+    var oldDataSize = byteData.getUint32(dataIndex + 4, Endian.little);
+    var oldRiffSize = byteData.getUint32(4, Endian.little);
+    if (oldDataSize == 0xFFFFFFFF || oldDataSize > wavBytes.length) {
+      oldDataSize = wavBytes.length - (dataIndex + 8);
+    }
+    if (oldRiffSize == 0xFFFFFFFF || oldRiffSize > wavBytes.length) {
+      oldRiffSize = wavBytes.length - 8;
+    }
 
     final newBytes = Uint8List(wavBytes.length + silenceBytesCount);
     newBytes.setRange(0, dataIndex + 8, wavBytes);
@@ -590,40 +628,66 @@ class SpeechService {
   }
 
   /// Play audio file with specific playback rate (e.g. 1.0 normal or 0.75 slow)
-  /// Switches AudioSession to playback mode to work correctly after STT recording.
+  /// Switches AudioSession to playback mode and forces loud speaker output.
   Future<void> playAudioFile(String filePath, {double speed = 1.0}) async {
+    final file = File(filePath);
+    if (!await file.exists()) {
+      debugPrint('[SpeechService] Audio file does not exist: $filePath');
+      return;
+    }
+    final fileSize = await file.length();
+    debugPrint('[SpeechService] Audio file validated: $filePath ($fileSize bytes)');
+    if (fileSize < 44) {
+      debugPrint('[SpeechService] Audio file too small/invalid ($fileSize bytes)');
+      return;
+    }
+
     try {
-      // Reconfigure audio session to playback mode (from record mode after STT)
+      debugPrint('[SpeechService] Audio player initialization starting...');
       final session = await AudioSession.instance;
       await session.configure(const AudioSessionConfiguration(
         avAudioSessionCategory: AVAudioSessionCategory.playback,
         avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.duckOthers,
-        avAudioSessionMode: AVAudioSessionMode.defaultMode,
+        avAudioSessionMode: AVAudioSessionMode.spokenAudio,
         avAudioSessionRouteSharingPolicy:
             AVAudioSessionRouteSharingPolicy.defaultPolicy,
         avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
         androidAudioAttributes: AndroidAudioAttributes(
-          contentType: AndroidAudioContentType.music,
-          flags: AndroidAudioFlags.none,
+          contentType: AndroidAudioContentType.speech,
+          flags: AndroidAudioFlags.audibilityEnforced,
           usage: AndroidAudioUsage.media,
         ),
         androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
         androidWillPauseWhenDucked: true,
       ));
       await session.setActive(true);
+      debugPrint('[SpeechService] AudioSession activated for speech playback');
 
       if (player.playing) {
+        debugPrint('[SpeechService] Stopping previous playback');
         await player.stop();
       }
+
       await player.setFilePath(filePath);
+      await player.setVolume(1.0);
       await player.setSpeed(speed);
+      debugPrint('[SpeechService] Audio playback started: speed=$speed, volume=1.0');
+
+      StreamSubscription? stateSub;
+      stateSub = player.playerStateStream.listen((state) {
+        debugPrint('[SpeechService] Audio playback state changed: playing=${state.playing}, processingState=${state.processingState}');
+        if (state.processingState == ProcessingState.completed) {
+          debugPrint('[SpeechService] Playback completed successfully');
+          stateSub?.cancel();
+        }
+      });
+
       await player.play();
     } catch (e) {
-      debugPrint('[SpeechService] Audio playback error: $e');
+      debugPrint('[SpeechService] Playback errors: $e');
     }
   }
 
-  /// Fetch daily spoken practice sentences from backend Groq AI service with offline fallback
   Future<List<Map<String, dynamic>>> fetchDailyPractice({
     String nativeLang = 'gu-IN',
     String targetLang = 'en-US',

@@ -1021,6 +1021,13 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                             Handler(Looper.getMainLooper()).post {
                                 try {
                                     val mp = android.media.MediaPlayer().apply {
+                                        setAudioAttributes(
+                                            android.media.AudioAttributes.Builder()
+                                                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                                                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                                                .build()
+                                        )
+                                        setVolume(1.0f, 1.0f)
                                         setDataSource(tempFile.absolutePath)
                                         prepare()
                                         start()
