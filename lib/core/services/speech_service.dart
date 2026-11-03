@@ -4,7 +4,6 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
@@ -16,9 +15,6 @@ class SpeechService {
   SpeechService._();
   static final SpeechService instance = SpeechService._();
 
-  static const MethodChannel _speechChannel = MethodChannel('com.lingoboop.app/speech');
-  static const EventChannel _speechEventChannel = EventChannel('com.lingoboop.app/speech_events');
-  Stream<Map<String, dynamic>>? _speechEventsStream;
 
   AudioRecorder? _recorder;
   AudioPlayer? _player;
@@ -32,61 +28,187 @@ class SpeechService {
 
   bool get isRecording => _isRecording;
 
-  /// Stream of real-time native speech events (partial, final, error, ready)
-  Stream<Map<String, dynamic>> get liveSpeechEvents {
-    return _speechEventsStream ??= _speechEventChannel
-        .receiveBroadcastStream()
-        .map((event) => Map<String, dynamic>.from(event as Map));
-  }
+  final StreamController<Map<String, dynamic>> _unifiedSpeechEventsController =
+      StreamController<Map<String, dynamic>>.broadcast();
 
-  /// Start live real-time speech recognition with partial interim results
-  Future<bool> startLiveRecognition(String languageCode) async {
+  Timer? _silenceTimer;
+  Timer? _maxRecordingTimer;
+  StreamSubscription<Amplitude>? _amplitudeSub;
+  bool _hasDetectedSpeech = false;
+  String _activeLanguageCode = 'gu-IN';
+
+  // Configurable thresholds for intelligent Gujarati VAD & trailing buffer management
+  double silenceThresholdDbfs = -42.0;
+  Duration trailingSilenceDuration = const Duration(milliseconds: 1400);
+  Duration postSilenceFlushDuration = const Duration(milliseconds: 250);
+  Duration maxRecordingDuration = const Duration(seconds: 35);
+
+  /// Unified stream of real-time speech events (ready, listening, rms, processing, transcribing, final, error)
+  Stream<Map<String, dynamic>> get liveSpeechEvents => _unifiedSpeechEventsController.stream;
+
+  /// Start high-fidelity speech recognition with intelligent VAD and trailing pause preservation
+  Future<bool> startLiveRecognition(
+    String languageCode, {
+    String? format,
+    List<String>? keyterms,
+    String? topic,
+  }) async {
     try {
+      _silenceTimer?.cancel();
+      _silenceTimer = null;
+      _maxRecordingTimer?.cancel();
+      _maxRecordingTimer = null;
+      await _amplitudeSub?.cancel();
+      _amplitudeSub = null;
+      _hasDetectedSpeech = false;
+      _activeLanguageCode = languageCode;
+
       var status = await Permission.microphone.status;
       if (!status.isGranted) {
         status = await Permission.microphone.request();
       }
       if (!status.isGranted) {
         debugPrint('[SpeechService] Microphone permission denied');
+        _unifiedSpeechEventsController.add({'event': 'error', 'message': 'Microphone permission denied'});
         return false;
       }
 
-      if (Platform.isAndroid) {
-        final ok = await _speechChannel.invokeMethod<bool>('startListening', {
-          'language': languageCode,
-        });
-        _isRecording = true;
-        return ok ?? false;
-      } else {
-        return await startRecording();
+      final ok = await startRecording();
+      if (!ok) {
+        _unifiedSpeechEventsController.add({'event': 'error', 'message': 'Failed to start microphone recording'});
+        return false;
       }
+
+      _unifiedSpeechEventsController.add({'event': 'ready'});
+      _unifiedSpeechEventsController.add({'event': 'listening', 'language': languageCode});
+
+      // Amplitude monitoring with intelligent trailing silence detection
+      _amplitudeSub = recorder
+          .onAmplitudeChanged(const Duration(milliseconds: 100))
+          .listen((amp) {
+        _unifiedSpeechEventsController.add({'event': 'rms', 'rms': amp.current});
+
+        // Speech detected above background threshold
+        if (amp.current > silenceThresholdDbfs) {
+          _hasDetectedSpeech = true;
+          _silenceTimer?.cancel();
+          _silenceTimer = null;
+        } else if (_hasDetectedSpeech) {
+          // Trailing silence observed after speech
+          _silenceTimer ??= Timer(trailingSilenceDuration, () async {
+            debugPrint('[SpeechService] Trailing silence threshold (1.4s) reached; finalizing utterance.');
+            await _autoFinalizeRecording(format: format, keyterms: keyterms, topic: topic);
+          });
+        }
+      });
+
+      // Safety guard against runaway recordings (> 35s)
+      _maxRecordingTimer = Timer(maxRecordingDuration, () async {
+        debugPrint('[SpeechService] Max recording duration reached; auto-finalizing.');
+        await _autoFinalizeRecording(format: format, keyterms: keyterms, topic: topic);
+      });
+
+      return true;
     } catch (e) {
-      debugPrint('[SpeechService] startLiveRecognition error: $e, falling back to audio recording');
-      return await startRecording();
+      debugPrint('[SpeechService] startLiveRecognition error: $e');
+      _unifiedSpeechEventsController.add({'event': 'error', 'message': e.toString()});
+      return false;
     }
   }
 
-  /// Stop live speech recognition
-  Future<void> stopLiveRecognition() async {
-    _isRecording = false;
-    if (Platform.isAndroid) {
-      try {
-        await _speechChannel.invokeMethod('stopListening');
-      } catch (_) {}
-    } else {
-      await stopRecording();
+  /// Automatically flushes trailing audio buffers, stops recorder, and triggers Gnani STT
+  Future<void> _autoFinalizeRecording({
+    String? format,
+    List<String>? keyterms,
+    String? topic,
+  }) async {
+    if (!_isRecording) return;
+    _silenceTimer?.cancel();
+    _silenceTimer = null;
+    _maxRecordingTimer?.cancel();
+    _maxRecordingTimer = null;
+    await _amplitudeSub?.cancel();
+    _amplitudeSub = null;
+
+    // Buffer flush delay: preserve final consonant/word ending in hardware DAC buffer
+    await Future.delayed(postSilenceFlushDuration);
+
+    final path = await stopRecording();
+    _unifiedSpeechEventsController.add({'event': 'processing'});
+    _unifiedSpeechEventsController.add({'event': 'transcribing'});
+
+    if (path == null) {
+      _unifiedSpeechEventsController.add({'event': 'final', 'text': ''});
+      return;
     }
+
+    final transcript = await transcribeAudio(
+      audioPath: path,
+      languageCode: _activeLanguageCode,
+      format: format,
+      keyterms: keyterms,
+      topic: topic,
+    );
+
+    _unifiedSpeechEventsController.add({'event': 'final', 'text': transcript ?? ''});
   }
 
-  /// Cancel live speech recognition
+  /// Stop live speech recognition manually, flush audio buffer, and return final Gnani STT transcript
+  Future<String?> stopLiveRecognition({
+    String? format,
+    List<String>? keyterms,
+    String? topic,
+  }) async {
+    _silenceTimer?.cancel();
+    _silenceTimer = null;
+    _maxRecordingTimer?.cancel();
+    _maxRecordingTimer = null;
+    await _amplitudeSub?.cancel();
+    _amplitudeSub = null;
+
+    if (!_isRecording) return null;
+
+    // Brief trailing audio buffer flush before stopping hardware recorder
+    await Future.delayed(const Duration(milliseconds: 200));
+    final path = await stopRecording();
+
+    _unifiedSpeechEventsController.add({'event': 'processing'});
+    _unifiedSpeechEventsController.add({'event': 'transcribing'});
+
+    if (path == null) {
+      _unifiedSpeechEventsController.add({'event': 'final', 'text': ''});
+      return null;
+    }
+
+    final transcript = await transcribeAudio(
+      audioPath: path,
+      languageCode: _activeLanguageCode,
+      format: format,
+      keyterms: keyterms,
+      topic: topic,
+    );
+
+    _unifiedSpeechEventsController.add({'event': 'final', 'text': transcript ?? ''});
+    return transcript;
+  }
+
+  /// Cancel live speech recognition immediately and discard recording
   Future<void> cancelLiveRecognition() async {
-    _isRecording = false;
-    if (Platform.isAndroid) {
-      try {
-        await _speechChannel.invokeMethod('cancelListening');
-      } catch (_) {}
-    } else {
-      await stopRecording();
+    _silenceTimer?.cancel();
+    _silenceTimer = null;
+    _maxRecordingTimer?.cancel();
+    _maxRecordingTimer = null;
+    await _amplitudeSub?.cancel();
+    _amplitudeSub = null;
+
+    if (_isRecording) {
+      final path = await stopRecording();
+      if (path != null) {
+        try {
+          final file = File(path);
+          if (await file.exists()) await file.delete();
+        } catch (_) {}
+      }
     }
   }
 
@@ -185,12 +307,20 @@ class SpeechService {
   Future<String?> transcribeAudio({
     required String audioPath,
     required String languageCode,
+    String? format,
+    List<String>? keyterms,
+    String? topic,
   }) async {
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
         final file = File(audioPath);
         if (!await file.exists()) {
           debugPrint('[SpeechService] Audio file does not exist: $audioPath');
+          return null;
+        }
+        final bytes = await file.length();
+        if (bytes < 44) {
+          debugPrint('[SpeechService] Audio file is too short ($bytes bytes): $audioPath');
           return null;
         }
 
@@ -202,19 +332,26 @@ class SpeechService {
 
         request.fields['language_code'] = languageCode;
         request.fields['model'] = 'prisma-v3.0';
+        if (format != null) request.fields['format'] = format;
+        if (topic != null) request.fields['topic'] = topic;
+        if (keyterms != null && keyterms.isNotEmpty) {
+          request.fields['keyterms'] = jsonEncode(keyterms);
+        }
 
         request.files.add(
           await http.MultipartFile.fromPath('audio_file', audioPath),
         );
 
-        final streamedResponse = await request.send().timeout(const Duration(seconds: 15));
+        final startMs = DateTime.now().millisecondsSinceEpoch;
+        final streamedResponse = await request.send().timeout(const Duration(seconds: 25));
         final responseBody = await streamedResponse.stream.bytesToString();
+        final elapsedMs = DateTime.now().millisecondsSinceEpoch - startMs;
 
         if (streamedResponse.statusCode == 200) {
           final decoded = jsonDecode(responseBody) as Map<String, dynamic>;
           if (decoded['success'] == true && decoded['data'] != null) {
             final transcript = (decoded['data']['transcript'] as String?)?.trim();
-            debugPrint('[SpeechService] STT Success: "$transcript"');
+            debugPrint('[SpeechService] STT Success ($elapsedMs ms, $bytes bytes, lang=$languageCode): "$transcript"');
             return transcript;
           }
         } else {

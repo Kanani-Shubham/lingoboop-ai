@@ -11,7 +11,11 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioRecord
 import android.media.MediaPlayer
+import android.media.MediaRecorder
+import java.io.ByteArrayOutputStream
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -92,6 +96,9 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
     private var isTtsReady = false
     private var speechRecognizer: SpeechRecognizer? = null
     private var activeMediaPlayer: MediaPlayer? = null
+    private var audioRecord: AudioRecord? = null
+    @Volatile private var isRecordingAudio = false
+    private var recordingThread: Thread? = null
 
     // Autonomous wandering handler
     private val roamHandler = Handler(Looper.getMainLooper())
@@ -1410,11 +1417,271 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
         }
     }
 
+    private fun makeWav(pcmData: ByteArray, sampleRate: Int = 16000, channels: Int = 1, bitsPerSample: Int = 16): ByteArray {
+        val totalAudioLen = pcmData.size
+        val totalDataLen = totalAudioLen + 36
+        val byteRate = sampleRate * channels * bitsPerSample / 8
+        val blockAlign = channels * bitsPerSample / 8
+
+        val header = ByteArray(44)
+        ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN).apply {
+            put('R'.code.toByte())
+            put('I'.code.toByte())
+            put('F'.code.toByte())
+            put('F'.code.toByte())
+            putInt(totalDataLen)
+            put('W'.code.toByte())
+            put('A'.code.toByte())
+            put('V'.code.toByte())
+            put('E'.code.toByte())
+            put('f'.code.toByte())
+            put('m'.code.toByte())
+            put('t'.code.toByte())
+            put(' '.code.toByte())
+            putInt(16) // Subchunk1Size for PCM
+            putShort(1.toShort()) // PCM format
+            putShort(channels.toShort())
+            putInt(sampleRate)
+            putInt(byteRate)
+            putShort(blockAlign.toShort())
+            putShort(bitsPerSample.toShort())
+            put('d'.code.toByte())
+            put('a'.code.toByte())
+            put('t'.code.toByte())
+            put('a'.code.toByte())
+            putInt(totalAudioLen)
+        }
+
+        val out = ByteArray(44 + totalAudioLen)
+        System.arraycopy(header, 0, out, 0, 44)
+        System.arraycopy(pcmData, 0, out, 44, totalAudioLen)
+        return out
+    }
+
+    private fun uploadWavToGnaniStt(
+        wavBytes: ByteArray,
+        langCode: String,
+        onSuccess: (String) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        Thread {
+            var transcriptResult: String? = null
+            val endpoints = linkedSetOf(
+                backendBaseUrl,
+                "http://127.0.0.1:8000",
+                "http://10.0.2.2:8000",
+                "http://10.82.30.80:8000",
+                "http://10.94.94.80:8000"
+            )
+            val boundary = "===Boundary" + System.currentTimeMillis() + "==="
+            val lineEnd = "\r\n"
+            val twoHyphens = "--"
+
+            for (baseUrl in endpoints) {
+                try {
+                    val url = URL("$baseUrl/api/v1/stt/transcribe")
+                    val conn = (url.openConnection() as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        connectTimeout = 4000
+                        readTimeout = 14000
+                        doOutput = true
+                        doInput = true
+                        useCaches = false
+                        setRequestProperty("Connection", "Keep-Alive")
+                        setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+                        val authHeader = if (!authToken.isNullOrEmpty()) "Bearer $authToken" else "Bearer dev_guest_token"
+                        setRequestProperty("Authorization", authHeader)
+                    }
+
+                    conn.outputStream.use { os ->
+                        // language_code
+                        os.write((twoHyphens + boundary + lineEnd).toByteArray())
+                        os.write(("Content-Disposition: form-data; name=\"language_code\"$lineEnd$lineEnd").toByteArray())
+                        os.write((langCode + lineEnd).toByteArray())
+
+                        // model
+                        os.write((twoHyphens + boundary + lineEnd).toByteArray())
+                        os.write(("Content-Disposition: form-data; name=\"model\"$lineEnd$lineEnd").toByteArray())
+                        os.write(("prisma-v3.0$lineEnd").toByteArray())
+
+                        // format
+                        os.write((twoHyphens + boundary + lineEnd).toByteArray())
+                        os.write(("Content-Disposition: form-data; name=\"format\"$lineEnd$lineEnd").toByteArray())
+                        os.write(("transcribe$lineEnd").toByteArray())
+
+                        // audio_file
+                        os.write((twoHyphens + boundary + lineEnd).toByteArray())
+                        os.write(("Content-Disposition: form-data; name=\"audio_file\"; filename=\"speech.wav\"$lineEnd").toByteArray())
+                        os.write(("Content-Type: audio/wav$lineEnd$lineEnd").toByteArray())
+                        os.write(wavBytes)
+                        os.write(lineEnd.toByteArray())
+
+                        os.write((twoHyphens + boundary + twoHyphens + lineEnd).toByteArray())
+                        os.flush()
+                    }
+
+                    if (conn.responseCode == 200) {
+                        val respStr = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                        val json = JSONObject(respStr)
+                        val data = json.optJSONObject("data")
+                        val text = data?.optString("transcript") ?: json.optString("transcript")
+                        if (!text.isNullOrBlank()) {
+                            transcriptResult = text.trim()
+                            Log.i(TAG, "Gnani STT succeeded at $baseUrl: \"$transcriptResult\"")
+                            break
+                        }
+                    } else {
+                        Log.w(TAG, "Gnani STT endpoint returned ${conn.responseCode} at $baseUrl")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "STT attempt failed at $baseUrl: ${e.message}")
+                }
+            }
+
+            Handler(Looper.getMainLooper()).post {
+                if (!transcriptResult.isNullOrBlank()) {
+                    onSuccess(transcriptResult!!)
+                } else {
+                    onError("Gnani STT returned empty transcript")
+                }
+            }
+        }.start()
+    }
+
     private fun startVoiceRecognition() {
+        if (isListening || isRecordingAudio) {
+            stopVoiceRecognition()
+            return
+        }
+
         stopVoiceRecognition()
+        stopAudioPlayback()
         isRepeatMode = false
         updateRepeatButtonUI()
 
+        val sampleRate = 16000
+        val channelConfig = AudioFormat.CHANNEL_IN_MONO
+        val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+        val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+        val bufferSize = Math.max(minBufferSize, 4096)
+
+        var record: AudioRecord? = null
+        try {
+            record = AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, channelConfig, audioFormat, bufferSize)
+        } catch (e: Exception) {
+            Log.w(TAG, "AudioRecord init failed: ${e.message}")
+        }
+
+        if (record == null || record.state != AudioRecord.STATE_INITIALIZED) {
+            Log.w(TAG, "AudioRecord not initialized, using legacy SpeechRecognizer")
+            startVoiceRecognitionLegacy()
+            return
+        }
+
+        audioRecord = record
+        isRecordingAudio = true
+        isListening = true
+
+        tvStatus?.text = "Listening… speak in $sourceLanguage"
+        petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('listen');")
+
+        recordingThread = Thread {
+            try {
+                record.startRecording()
+                val shortBuffer = ShortArray(1024)
+                val pcmData = ByteArrayOutputStream()
+                var speechDetected = false
+                var lastSpeechTime = System.currentTimeMillis()
+                val startTime = System.currentTimeMillis()
+                val silenceTimeoutMs = 1400L // 1.4s trailing silence allows natural pauses without premature cutoff
+                val maxDurationMs = 30000L
+
+                while (isRecordingAudio) {
+                    val read = record.read(shortBuffer, 0, shortBuffer.size)
+                    if (read > 0) {
+                        var sumSquares = 0.0
+                        for (i in 0 until read) {
+                            val sample = shortBuffer[i].toInt()
+                            sumSquares += sample * sample
+                            pcmData.write(sample and 0xFF)
+                            pcmData.write((sample shr 8) and 0xFF)
+                        }
+                        val rms = kotlin.math.sqrt(sumSquares / read)
+                        val dbfs = if (rms > 0) 20.0 * kotlin.math.log10(rms / 32768.0) else -999.0
+
+                        val now = System.currentTimeMillis()
+                        if (dbfs > -40.0) {
+                            speechDetected = true
+                            lastSpeechTime = now
+                        } else if (speechDetected && (now - lastSpeechTime > silenceTimeoutMs)) {
+                            Log.i(TAG, "Trailing silence detected after speech, completing recording.")
+                            break
+                        }
+
+                        if (now - startTime > maxDurationMs) {
+                            Log.i(TAG, "Max recording duration reached")
+                            break
+                        }
+                    }
+                }
+
+                // Flush trailing 200ms audio buffer to capture complete word endings
+                try {
+                    val flushBuffer = ShortArray(1600)
+                    val readFlush = record.read(flushBuffer, 0, flushBuffer.size)
+                    if (readFlush > 0) {
+                        for (i in 0 until readFlush) {
+                            val sample = flushBuffer[i].toInt()
+                            pcmData.write(sample and 0xFF)
+                            pcmData.write((sample shr 8) and 0xFF)
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                try {
+                    record.stop()
+                    record.release()
+                } catch (_: Exception) {}
+                audioRecord = null
+                isRecordingAudio = false
+
+                val rawPcm = pcmData.toByteArray()
+                val durationSec = rawPcm.size / 32000.0
+
+                Handler(Looper.getMainLooper()).post {
+                    isListening = false
+                    if (rawPcm.isEmpty() || (!speechDetected && durationSec < 0.4)) {
+                        tvStatus?.text = "Nothing heard. Tap mic and try again."
+                        petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('idle');")
+                    } else {
+                        tvStatus?.text = "Transcribing with Gnani Prisma v3.0…"
+                        petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('think');")
+                        val wavBytes = makeWav(rawPcm, sampleRate, 1, 16)
+                        uploadWavToGnaniStt(
+                            wavBytes = wavBytes,
+                            langCode = sourceLanguage,
+                            onSuccess = { transcript ->
+                                handleEnteredText(transcript)
+                            },
+                            onError = { err ->
+                                Log.w(TAG, "Gnani STT error: $err, falling back to legacy SpeechRecognizer")
+                                startVoiceRecognitionLegacy()
+                            }
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in audio recording thread: ${e.message}", e)
+                Handler(Looper.getMainLooper()).post {
+                    isListening = false
+                    isRecordingAudio = false
+                    startVoiceRecognitionLegacy()
+                }
+            }
+        }.apply { start() }
+    }
+
+    private fun startVoiceRecognitionLegacy() {
         try {
             if (!SpeechRecognizer.isRecognitionAvailable(context)) {
                 tvStatus?.text = "Speech recognizer unavailable on this device."
@@ -1473,15 +1740,137 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
             return
         }
 
+        if (isListening || isRecordingAudio) {
+            stopVoiceRecognition()
+            return
+        }
+
         stopVoiceRecognition()
         stopAudioPlayback()
 
         isRepeatMode = true
         updateRepeatButtonUI()
 
-        tvStatus?.text = "Say the target sentence out loud now…"
+        val sampleRate = 16000
+        val channelConfig = AudioFormat.CHANNEL_IN_MONO
+        val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+        val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+        val bufferSize = Math.max(minBufferSize, 4096)
+
+        var record: AudioRecord? = null
+        try {
+            record = AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, channelConfig, audioFormat, bufferSize)
+        } catch (e: Exception) {
+            Log.w(TAG, "AudioRecord init failed for repeat: ${e.message}")
+        }
+
+        if (record == null || record.state != AudioRecord.STATE_INITIALIZED) {
+            Log.w(TAG, "AudioRecord not initialized, using legacy repeat recognizer")
+            startRepeatPracticeLegacy()
+            return
+        }
+
+        audioRecord = record
+        isRecordingAudio = true
+        isListening = true
+
+        tvStatus?.text = "Say: $translatedText"
         petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('listen');")
 
+        recordingThread = Thread {
+            try {
+                record.startRecording()
+                val shortBuffer = ShortArray(1024)
+                val pcmData = ByteArrayOutputStream()
+                var speechDetected = false
+                var lastSpeechTime = System.currentTimeMillis()
+                val startTime = System.currentTimeMillis()
+                val silenceTimeoutMs = 1400L
+                val maxDurationMs = 25000L
+
+                while (isRecordingAudio) {
+                    val read = record.read(shortBuffer, 0, shortBuffer.size)
+                    if (read > 0) {
+                        var sumSquares = 0.0
+                        for (i in 0 until read) {
+                            val sample = shortBuffer[i].toInt()
+                            sumSquares += sample * sample
+                            pcmData.write(sample and 0xFF)
+                            pcmData.write((sample shr 8) and 0xFF)
+                        }
+                        val rms = kotlin.math.sqrt(sumSquares / read)
+                        val dbfs = if (rms > 0) 20.0 * kotlin.math.log10(rms / 32768.0) else -999.0
+
+                        val now = System.currentTimeMillis()
+                        if (dbfs > -40.0) {
+                            speechDetected = true
+                            lastSpeechTime = now
+                        } else if (speechDetected && (now - lastSpeechTime > silenceTimeoutMs)) {
+                            Log.i(TAG, "Repeat silence detected, ending recording.")
+                            break
+                        }
+
+                        if (now - startTime > maxDurationMs) {
+                            break
+                        }
+                    }
+                }
+
+                try {
+                    val flushBuffer = ShortArray(1600)
+                    val readFlush = record.read(flushBuffer, 0, flushBuffer.size)
+                    if (readFlush > 0) {
+                        for (i in 0 until readFlush) {
+                            val sample = flushBuffer[i].toInt()
+                            pcmData.write(sample and 0xFF)
+                            pcmData.write((sample shr 8) and 0xFF)
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                try {
+                    record.stop()
+                    record.release()
+                } catch (_: Exception) {}
+                audioRecord = null
+                isRecordingAudio = false
+
+                val rawPcm = pcmData.toByteArray()
+                Handler(Looper.getMainLooper()).post {
+                    isListening = false
+                    if (rawPcm.isEmpty() || (!speechDetected && rawPcm.size < 32000 * 0.4)) {
+                        tvStatus?.text = "Could not capture clear speech. Tap Repeat to try again."
+                        petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('idle');")
+                        isRepeatMode = false
+                        updateRepeatButtonUI()
+                    } else {
+                        tvStatus?.text = "Evaluating pronunciation with Gnani Prisma…"
+                        val wavBytes = makeWav(rawPcm, sampleRate, 1, 16)
+                        uploadWavToGnaniStt(
+                            wavBytes = wavBytes,
+                            langCode = if (targetLanguage.contains("en", ignoreCase = true)) "en-IN" else targetLanguage,
+                            onSuccess = { transcript ->
+                                evaluatePronunciation(transcript)
+                            },
+                            onError = { err ->
+                                Log.w(TAG, "Gnani repeat STT error: $err, trying legacy")
+                                startRepeatPracticeLegacy()
+                            }
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in repeat recording: ${e.message}", e)
+                Handler(Looper.getMainLooper()).post {
+                    isListening = false
+                    isRecordingAudio = false
+                    startRepeatPracticeLegacy()
+                }
+            }
+        }.apply { start() }
+    }
+
+    private fun startRepeatPracticeLegacy() {
         try {
             if (!SpeechRecognizer.isRecognitionAvailable(context)) {
                 tvStatus?.text = "Speech recognizer unavailable on this device."
@@ -1521,7 +1910,6 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                 override fun onEvent(eventType: Int, params: Bundle?) {}
             })
 
-            // Listen in targetLanguage (e.g. en-US) for repeat pronunciation assessment
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, targetLanguage)
@@ -1606,6 +1994,12 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
 
     private fun stopVoiceRecognition() {
         isListening = false
+        isRecordingAudio = false
+        try {
+            audioRecord?.stop()
+            audioRecord?.release()
+        } catch (_: Exception) {}
+        audioRecord = null
         try {
             speechRecognizer?.stopListening()
             speechRecognizer?.cancel()

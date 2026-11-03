@@ -292,7 +292,11 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
 
     _liveSpeechSub = SpeechService.instance.liveSpeechEvents.listen((event) {
       final ev = event['event'] as String?;
-      if (ev == 'partial') {
+      if (ev == 'processing') {
+        state = state.copyWith(statusNote: 'Processing audio…', petMode: 'think');
+      } else if (ev == 'transcribing') {
+        state = state.copyWith(statusNote: 'Transcribing with Gnani Prisma v3.0…', petMode: 'think');
+      } else if (ev == 'partial') {
         final text = (event['text'] as String?)?.trim() ?? '';
         if (text.isNotEmpty && state.isListening && !state.isRepeatPracticing) {
           state = state.copyWith(
@@ -309,31 +313,20 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
         _previewDebounceTimer?.cancel();
         if (text.isNotEmpty) {
           stopListeningAndProcess(text);
-        } else if (state.spokenText.isNotEmpty) {
-          stopListeningAndProcess(state.spokenText);
         } else {
           state = state.copyWith(
             isListening: false,
             petMode: 'idle',
             statusNote: 'Nothing heard. Tap the mic and try again.',
           );
-        }
-      } else if (ev == 'end_of_speech') {
-        if (state.spokenText.isNotEmpty) {
-          _previewDebounceTimer?.cancel();
-          stopListeningAndProcess(state.spokenText);
         }
       } else if (ev == 'error') {
         _previewDebounceTimer?.cancel();
-        if (state.spokenText.isNotEmpty) {
-          stopListeningAndProcess(state.spokenText);
-        } else {
-          state = state.copyWith(
-            isListening: false,
-            petMode: 'idle',
-            statusNote: 'Nothing heard. Tap the mic and try again.',
-          );
-        }
+        state = state.copyWith(
+          isListening: false,
+          petMode: 'idle',
+          statusNote: 'Nothing heard. Tap the mic and try again.',
+        );
       }
     });
 
@@ -384,21 +377,17 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
   Future<void> stopListeningAndProcess([String? directText]) async {
     _previewDebounceTimer?.cancel();
     _liveSpeechSub?.cancel();
-    await SpeechService.instance.stopLiveRecognition();
 
     String? recognizedText = directText;
     if (recognizedText == null || recognizedText.isEmpty) {
-      recognizedText = state.spokenText;
-    }
-
-    if (recognizedText.isEmpty) {
-      final audioPath = await SpeechService.instance.stopRecording();
-      if (audioPath != null) {
-        recognizedText = await SpeechService.instance.transcribeAudio(
-          audioPath: audioPath,
-          languageCode: state.sourceLanguage.bcp47,
-        );
-      }
+      state = state.copyWith(
+        isListening: false,
+        petMode: 'think',
+        statusNote: 'Transcribing with Gnani Prisma v3.0…',
+      );
+      recognizedText = await SpeechService.instance.stopLiveRecognition();
+    } else {
+      await SpeechService.instance.cancelLiveRecognition();
     }
 
     if (recognizedText == null || recognizedText.trim().isEmpty) {
@@ -684,14 +673,10 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
         : state.spokenText.trim();
 
     if (userSpoken.isEmpty) {
-      final audioPath = await SpeechService.instance.stopRecording();
-      if (audioPath != null) {
-        final transcript = await SpeechService.instance.transcribeAudio(
-          audioPath: audioPath,
-          languageCode: state.targetLanguage.bcp47,
-        );
-        userSpoken = transcript ?? '';
-      }
+      final transcript = await SpeechService.instance.stopLiveRecognition();
+      userSpoken = transcript ?? '';
+    } else {
+      await SpeechService.instance.cancelLiveRecognition();
     }
 
     _evaluatePronunciation(userSpoken);

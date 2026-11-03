@@ -16,7 +16,11 @@ class BaseSTTProvider(ABC):
         audio_bytes: bytes,
         filename: str = "audio.wav",
         language_code: str = "gu-IN",
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        format_mode: Optional[str] = None,
+        keyterms: Optional[list] = None,
+        topic: Optional[str] = None,
+        previous_text: Optional[str] = None
     ) -> STTResponseData:
         """Transcribe an audio buffer into text with confidence metrics."""
         pass
