@@ -146,5 +146,57 @@ class OverlayService {
       debugPrint('Error updating voice in overlay: $e');
     }
   }
+
+  /// Update backend base URL in running native overlay
+  Future<void> updateBackendUrl(String backendUrl) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod('updateBackendUrl', {
+        'backendUrl': backendUrl,
+      });
+    } catch (e) {
+      debugPrint('Error updating backend URL in overlay: $e');
+    }
+  }
+
+  /// Synchronize authoritative PolyCard state with running native overlay
+  Future<void> updateCardState({
+    required String petId,
+    required String petName,
+    required String petColorHex,
+    required String voiceId,
+    required String sourceLanguage,
+    required String targetLanguage,
+    required String originalText,
+    required String translatedText,
+    String? correction,
+    String? statusNote,
+    List<String>? words,
+    double? pronunciationScore,
+    String? requestId,
+  }) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod('updateCardState', {
+        'petId': petId,
+        'petName': petName,
+        'petColor': petColorHex,
+        'voiceId': voiceId,
+        'sourceLanguage': sourceLanguage,
+        'targetLanguage': targetLanguage,
+        'originalText': originalText,
+        'translatedText': translatedText,
+        'correction': correction,
+        'statusNote': statusNote,
+        'words': words?.join(' '),
+        'pronunciationScore': pronunciationScore,
+        'requestId': requestId ?? DateTime.now().millisecondsSinceEpoch.toString(),
+        'updatedAt': DateTime.now().millisecondsSinceEpoch,
+      });
+    } catch (e) {
+      debugPrint('Error updating card state in overlay: $e');
+    }
+  }
 }
+
 

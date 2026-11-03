@@ -24,6 +24,8 @@ class FloatingPetService : Service() {
         const val ACTION_UPDATE_LANGUAGES = "com.lingoboop.overlay.ACTION_UPDATE_LANGUAGES"
         const val ACTION_UPDATE_AUTH_TOKEN = "com.lingoboop.overlay.ACTION_UPDATE_AUTH_TOKEN"
         const val ACTION_UPDATE_VOICE = "com.lingoboop.overlay.ACTION_UPDATE_VOICE"
+        const val ACTION_UPDATE_CARD_STATE = "com.lingoboop.overlay.ACTION_UPDATE_CARD_STATE"
+        const val ACTION_UPDATE_BACKEND_URL = "com.lingoboop.overlay.ACTION_UPDATE_BACKEND_URL"
 
         const val EXTRA_PET_KEY = "extra_pet_key"
         const val EXTRA_PET_NAME = "extra_pet_name"
@@ -77,6 +79,41 @@ class FloatingPetService : Service() {
             ACTION_UPDATE_VOICE -> {
                 val voice = intent?.getStringExtra(EXTRA_VOICE) ?: "Shivani"
                 windowManager?.updateVoice(voice)
+            }
+            ACTION_UPDATE_BACKEND_URL -> {
+                val url = intent?.getStringExtra("backend_url") ?: "http://127.0.0.1:8000"
+                windowManager?.updateBackendUrl(url)
+            }
+            ACTION_UPDATE_CARD_STATE -> {
+                val petId = intent?.getStringExtra("pet_id") ?: "fox"
+                val petName = intent?.getStringExtra("pet_name") ?: "Maru"
+                val petColor = intent?.getStringExtra("pet_color") ?: "#c4571c"
+                val voiceId = intent?.getStringExtra("voice_id") ?: "Shivani"
+                val srcLang = intent?.getStringExtra("source_language") ?: "gu-IN"
+                val tgtLang = intent?.getStringExtra("target_language") ?: "en-US"
+                val orig = intent?.getStringExtra("original_text") ?: ""
+                val trans = intent?.getStringExtra("translated_text") ?: ""
+                val corr = intent?.getStringExtra("correction")
+                val status = intent?.getStringExtra("status_note")
+                val words = intent?.getStringExtra("words")
+                val score = if (intent?.hasExtra("pronunciation_score") == true) intent.getDoubleExtra("pronunciation_score", 0.0) else null
+                val reqId = intent?.getStringExtra("request_id") ?: System.currentTimeMillis().toString()
+
+                windowManager?.updateCardState(
+                    petId = petId,
+                    petName = petName,
+                    petColor = petColor,
+                    voiceId = voiceId,
+                    sourceLang = srcLang,
+                    targetLang = tgtLang,
+                    originalText = orig,
+                    translatedText = trans,
+                    correction = corr,
+                    statusNote = status,
+                    words = words,
+                    score = score,
+                    requestId = reqId
+                )
             }
             ACTION_START -> {
                 val token = intent?.getStringExtra(EXTRA_AUTH_TOKEN)

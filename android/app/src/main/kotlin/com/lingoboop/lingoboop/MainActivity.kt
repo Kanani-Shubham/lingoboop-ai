@@ -206,6 +206,49 @@ class MainActivity : FlutterActivity() {
                     startService(intent)
                     result.success(true)
                 }
+                "updateBackendUrl" -> {
+                    val backendUrl = call.argument<String>("backendUrl") ?: "http://127.0.0.1:8000"
+                    val intent = Intent(this, FloatingPetService::class.java).apply {
+                        action = FloatingPetService.ACTION_UPDATE_BACKEND_URL
+                        putExtra("backend_url", backendUrl)
+                    }
+                    startService(intent)
+                    result.success(true)
+                }
+                "updateCardState" -> {
+                    val petId = call.argument<String>("petId") ?: "fox"
+                    val petName = call.argument<String>("petName") ?: "Maru"
+                    val petColor = call.argument<String>("petColorHex") ?: "#c4571c"
+                    val voiceId = call.argument<String>("voiceId") ?: "Shivani"
+                    val sourceLang = call.argument<String>("sourceLanguage") ?: "gu-IN"
+                    val targetLang = call.argument<String>("targetLanguage") ?: "en-US"
+                    val originalText = call.argument<String>("originalText") ?: ""
+                    val translatedText = call.argument<String>("translatedText") ?: ""
+                    val correction = call.argument<String>("correction")
+                    val statusNote = call.argument<String>("statusNote")
+                    val words = call.argument<String>("words")
+                    val pronunciationScore = call.argument<Double>("pronunciationScore")
+                    val requestId = call.argument<String>("requestId") ?: System.currentTimeMillis().toString()
+
+                    val intent = Intent(this, FloatingPetService::class.java).apply {
+                        action = FloatingPetService.ACTION_UPDATE_CARD_STATE
+                        putExtra("pet_id", petId)
+                        putExtra("pet_name", petName)
+                        putExtra("pet_color", petColor)
+                        putExtra("voice_id", voiceId)
+                        putExtra("source_language", sourceLang)
+                        putExtra("target_language", targetLang)
+                        putExtra("original_text", originalText)
+                        putExtra("translated_text", translatedText)
+                        if (correction != null) putExtra("correction", correction)
+                        if (statusNote != null) putExtra("status_note", statusNote)
+                        if (words != null) putExtra("words", words)
+                        if (pronunciationScore != null) putExtra("pronunciation_score", pronunciationScore)
+                        putExtra("request_id", requestId)
+                    }
+                    startService(intent)
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         }

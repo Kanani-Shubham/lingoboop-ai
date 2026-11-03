@@ -82,6 +82,26 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
           if (ev == 'open_card_requested' || ev == 'pet_tapped') {
             final size = MediaQuery.of(context).size;
             _openCard(size.width);
+          } else if (ev == 'card_state_updated') {
+            final spoken = event['spokenText'] as String?;
+            final translated = event['translatedText'] as String?;
+            final correction = event['correction'] as String?;
+            if (translated != null && translated.isNotEmpty) {
+              ref.read(companionProvider.notifier).updateFromExternalOverlay(
+                spoken: spoken ?? '',
+                translated: translated,
+                correction: correction,
+              );
+            }
+          } else if (ev == 'pronunciation_evaluated') {
+            final heard = event['heard'] as String?;
+            final score = (event['score'] as num?)?.toDouble() ?? 0.0;
+            final feedback = event['feedback'] as String?;
+            ref.read(companionProvider.notifier).updatePronunciationFromExternal(
+              heard: heard ?? '',
+              score: score,
+              feedback: feedback ?? '',
+            );
           }
         }
       });

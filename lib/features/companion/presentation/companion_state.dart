@@ -127,10 +127,14 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
             targetLanguage: LanguageRegistry.getByCode('en'),
           ),
         ) {
-    SpeechService.instance.resolveBackendUrl();
+    SpeechService.instance.resolveBackendUrl().then((url) {
+      OverlayService.instance.updateBackendUrl(url);
+    });
     UserDataService.instance.getSelectedVoice().then((voice) {
       if (mounted) {
         state = state.copyWith(selectedVoice: voice);
+        OverlayService.instance.updateVoice(voice);
+        _syncOverlayCard();
       }
     });
   }
@@ -140,10 +144,30 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
   StreamSubscription? _liveSpeechSub;
   int _translationToken = 0;
 
+  void _syncOverlayCard([double? score]) {
+    final pet = state.activePet;
+    final colorHex = '#${pet.accentColor.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+    OverlayService.instance.updateCardState(
+      petId: pet.key,
+      petName: pet.name,
+      petColorHex: colorHex,
+      voiceId: state.selectedVoice,
+      sourceLanguage: state.sourceLanguage.bcp47,
+      targetLanguage: state.targetLanguage.bcp47,
+      originalText: state.spokenText,
+      translatedText: state.translatedText,
+      correction: state.correction,
+      statusNote: state.statusNote,
+      words: state.words.map((w) => w.text).toList(),
+      pronunciationScore: score,
+    );
+  }
+
   void setTtsVoice(String voice) {
     state = state.copyWith(selectedVoice: voice);
     UserDataService.instance.saveSelectedVoice(voice);
     OverlayService.instance.updateVoice(voice);
+    _syncOverlayCard();
   }
 
   void setPet(String petKey) {
@@ -156,6 +180,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
       petName: pet.name,
       petColorHex: colorHex,
     );
+    _syncOverlayCard();
   }
 
   void setSourceLanguage(String code) {
@@ -172,6 +197,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
       sourceLang: lang.bcp47,
       targetLang: state.targetLanguage.bcp47,
     );
+    _syncOverlayCard();
   }
 
   void setTargetLanguage(String code) {
@@ -185,6 +211,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
       sourceLang: state.sourceLanguage.bcp47,
       targetLang: lang.bcp47,
     );
+    _syncOverlayCard();
   }
 
   void toggleCard() {
@@ -497,6 +524,8 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
       statusNote: '',
     );
 
+    _syncOverlayCard();
+
     playKaraoke(1.0);
   }
 
@@ -719,6 +748,59 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
       sourceLanguage: state.sourceLanguage.bcp47,
       targetLanguage: state.targetLanguage.bcp47,
       sourceText: state.spokenText,
+      translatedText: state.translatedText,
+      pronunciationScore: score,
+    );
+
+    _syncOverlayCard(score);
+  }
+
+  /// Sync external Android overlay translation events back into Flutter app state
+  void updateFromExternalOverlay({
+    required String spoken,
+    required String translated,
+    String? correction,
+  }) {
+    final rawWords = translated.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    final wordList = rawWords
+        .map((w) => KaraokeWord(text: w, isHighlighted: false, evaluation: WordEvaluationState.none))
+        .toList();
+
+    state = state.copyWith(
+      spokenText: spoken,
+      translatedText: translated,
+      correction: correction,
+      words: wordList,
+      statusNote: 'Tap Repeat to test your pronunciation!',
+      petMode: 'idle',
+    );
+
+    UserDataService.instance.recordConversationMessage(
+      characterId: state.activePet.key,
+      sourceLanguage: state.sourceLanguage.bcp47,
+      targetLanguage: state.targetLanguage.bcp47,
+      sourceText: spoken,
+      translatedText: translated,
+    );
+  }
+
+  /// Sync external Android overlay pronunciation score back into Flutter app state
+  void updatePronunciationFromExternal({
+    required String heard,
+    required double score,
+    required String feedback,
+  }) {
+    state = state.copyWith(
+      spokenText: 'Heard: $heard',
+      statusNote: feedback,
+      petMode: score >= 80 ? 'dance' : (score >= 50 ? 'talk' : 'oops'),
+    );
+
+    UserDataService.instance.recordConversationMessage(
+      characterId: state.activePet.key,
+      sourceLanguage: state.sourceLanguage.bcp47,
+      targetLanguage: state.targetLanguage.bcp47,
+      sourceText: 'Heard: $heard',
       translatedText: state.translatedText,
       pronunciationScore: score,
     );
