@@ -862,9 +862,8 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                         readTimeout = 8000
                         doOutput = true
                         setRequestProperty("Content-Type", "application/json")
-                        if (!authToken.isNullOrEmpty()) {
-                            setRequestProperty("Authorization", "Bearer $authToken")
-                        }
+                        val authHeader = if (!authToken.isNullOrEmpty()) "Bearer $authToken" else "Bearer dev_guest_token"
+                        setRequestProperty("Authorization", authHeader)
                     }
 
                     val payload = org.json.JSONObject().apply {
@@ -909,9 +908,8 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                             readTimeout = 8000
                             doOutput = true
                             setRequestProperty("Content-Type", "application/json")
-                            if (!authToken.isNullOrEmpty()) {
-                                setRequestProperty("Authorization", "Bearer $authToken")
-                            }
+                            val authHeader = if (!authToken.isNullOrEmpty()) "Bearer $authToken" else "Bearer dev_guest_token"
+                            setRequestProperty("Authorization", authHeader)
                         }
 
                         val transPayload = org.json.JSONObject().apply {
@@ -996,9 +994,8 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                         readTimeout = 6000
                         doOutput = true
                         setRequestProperty("Content-Type", "application/json")
-                        if (!authToken.isNullOrEmpty()) {
-                            setRequestProperty("Authorization", "Bearer $authToken")
-                        }
+                        val authHeader = if (!authToken.isNullOrEmpty()) "Bearer $authToken" else "Bearer dev_guest_token"
+                        setRequestProperty("Authorization", authHeader)
                     }
 
                     val payload = org.json.JSONObject().apply {

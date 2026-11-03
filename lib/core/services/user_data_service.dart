@@ -240,7 +240,7 @@ class UserDataService {
         await client.from('messages').insert({
           'conversation_id': convId,
           'user_id': uid,
-          'sender_role': 'pet',
+          'sender_role': 'assistant',
           'source_text': sourceText,
           'translated_text': translatedText,
         });

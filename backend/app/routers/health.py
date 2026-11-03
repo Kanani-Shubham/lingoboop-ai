@@ -6,6 +6,7 @@ router = APIRouter(tags=["Health"])
 
 
 @router.get("/health", response_model=APIResponse)
+@router.get("/api/v1/health", response_model=APIResponse)
 async def health_check():
     """System health check and provider readiness report (zero secrets exposed)."""
     return APIResponse(
@@ -27,4 +28,3 @@ async def health_check():
             }
         }
     )
-

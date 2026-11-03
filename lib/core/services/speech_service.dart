@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -94,6 +95,8 @@ class SpeechService {
     final token = AuthService.instance.currentAccessToken;
     if (token != null && token.isNotEmpty) {
       headers['Authorization'] = 'Bearer $token';
+    } else {
+      headers['Authorization'] = 'Bearer dev_guest_token';
     }
     return headers;
   }
@@ -115,7 +118,7 @@ class SpeechService {
 
     for (final base in candidates) {
       try {
-        final res = await http.get(Uri.parse('$base/health')).timeout(const Duration(milliseconds: 500));
+        final res = await http.get(Uri.parse('$base/api/v1/health')).timeout(const Duration(milliseconds: 500));
         if (res.statusCode == 200) {
           _backendBaseUrl = base;
           return base;
@@ -587,8 +590,28 @@ class SpeechService {
   }
 
   /// Play audio file with specific playback rate (e.g. 1.0 normal or 0.75 slow)
+  /// Switches AudioSession to playback mode to work correctly after STT recording.
   Future<void> playAudioFile(String filePath, {double speed = 1.0}) async {
     try {
+      // Reconfigure audio session to playback mode (from record mode after STT)
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration(
+        avAudioSessionCategory: AVAudioSessionCategory.playback,
+        avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.duckOthers,
+        avAudioSessionMode: AVAudioSessionMode.defaultMode,
+        avAudioSessionRouteSharingPolicy:
+            AVAudioSessionRouteSharingPolicy.defaultPolicy,
+        avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
+        androidAudioAttributes: AndroidAudioAttributes(
+          contentType: AndroidAudioContentType.music,
+          flags: AndroidAudioFlags.none,
+          usage: AndroidAudioUsage.media,
+        ),
+        androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+        androidWillPauseWhenDucked: true,
+      ));
+      await session.setActive(true);
+
       if (player.playing) {
         await player.stop();
       }
