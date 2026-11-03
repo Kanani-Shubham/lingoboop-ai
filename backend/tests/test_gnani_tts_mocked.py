@@ -85,6 +85,7 @@ async def test_tts_voice_catalog_endpoint():
     from app.routers.tts import get_voice_catalog
     resp = await get_voice_catalog()
     assert resp.success is True
+    assert isinstance(resp.data, list)
     assert len(resp.data) == 13
     voice_ids = [v["id"] for v in resp.data]
     assert "Shivani" in voice_ids
@@ -96,5 +97,3 @@ async def test_tts_voice_catalog_endpoint():
         assert v["gender"] in ["male", "female"]
         assert len(v["supported_languages"]) > 0
         assert "en-IN" in v["sample_text_by_lang"]
-
-
