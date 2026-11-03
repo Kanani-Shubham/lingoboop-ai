@@ -98,6 +98,28 @@ All critical user-reported issues from physical Android 14 device testing have b
 | **Backend Daily Practice & AI Tests** | `pytest backend/tests/test_daily_practice.py` | **PASS (3/3)** | Authenticated endpoint, unauthenticated rejection, AI generation |
 | **Backend Translation & Fallback Tests**| `pytest backend/tests/test_translation.py` | **PASS (4/4)** | Phrase cache, identity check, Groq fallback, auth rejection |
 | **Backend JWT Security & RLS Tests** | `pytest backend/tests/test_jwt_security.py` | **PASS (8/8)** | Valid token, expired, forged signature, wrong aud, missing claims |
-| **Full Backend Test Suite** | `pytest backend/tests/ -v` | **PASS (43/43)** | 100% of all 43 tests passing in 30.4s |
-| **Android Debug APK Build** | `flutter build apk --debug` | **PASS** | `app-debug.apk` built successfully in 73.8s |
+| **Full Backend Test Suite** | `pytest backend/tests/ -v` | **PASS (43/43)** | 100% of all 43 tests passing in 49.44s |
+| **Android Debug APK Build** | `flutter build apk --debug` | **PASS** | `app-debug.apk` built successfully in 54.1s |
 | **FastAPI Backend Server** | `uvicorn app.main:app --port 8000` | **HEALTHY** | Running on `http://0.0.0.0:8000`, `/health` returns `success: true` |
+
+---
+
+## 4. HTML Prototype Fidelity (Walking, Docking, Live Speech Recognition & Auto Playback)
+
+The Flutter mobile implementation matches the primary reference prototype `product_context/prototype/original/polypet-demo.html`:
+
+1. **Walking & Docking Physics:**
+   - Tap calculation: `side = (petX + 75 < screenW / 2) ? 'r' : 'l'`.
+   - Card docking: `left: 108` if `side == 'r'`, `right: 108` if `side == 'l'`, and `bottom: 76 + keyboardInsets`.
+   - Smooth walking animation: target `tx = -24` if `side == 'r'`, `tx = screenW - 126` if `side == 'l'`, pet walks at 58px/s without snapping or jumping.
+   - Facing angle: stationary pet turns to face card (`_facing = 0.9` if `side == 'r'`, `-0.9` if `side == 'l'`). Card closure restores autonomous idle wandering.
+   - Pan gestures: 6.0px threshold distinguishes taps from drags; dragging closes any open card.
+
+2. **Live Speech Recognition & Auto Voice Pipeline:**
+   - Real-time partial results: native Android `SpeechRecognizer` exposes interim partial words directly to Flutter via `EventChannel('com.lingoboop.app/speech_events')`.
+   - 450ms preview translation debounce into Karaoke view.
+   - Authoritative Groq translation upon utterance finalization.
+   - Automatic synthesized voice playback with Gnani Timbre TTS (with 120ms lead-in silence).
+   - Mode shifts: `'listen'` while recording, `'think'` during translation, `'talk'` during voice playback, then returns to `'idle'`.
+   - Typed sentence input executes identical translation and automatic TTS playback flow, floating above the Android on-screen keyboard.
+

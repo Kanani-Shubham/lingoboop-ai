@@ -3,7 +3,13 @@ package com.lingoboop.lingoboop
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import com.lingoboop.lingoboop.overlay.FloatingPetService
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -14,6 +20,11 @@ class MainActivity : FlutterActivity() {
 
     private val CHANNEL = "com.lingoboop.app/overlay"
     private val EVENT_CHANNEL = "com.lingoboop.app/overlay_events"
+    private val SPEECH_CHANNEL = "com.lingoboop.app/speech"
+    private val SPEECH_EVENT_CHANNEL = "com.lingoboop.app/speech_events"
+
+    private var speechRecognizer: SpeechRecognizer? = null
+    private var speechEventSink: EventChannel.EventSink? = null
 
     companion object {
         var eventSink: EventChannel.EventSink? = null
@@ -44,6 +55,40 @@ class MainActivity : FlutterActivity() {
                 }
             }
         )
+
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, SPEECH_EVENT_CHANNEL).setStreamHandler(
+            object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    speechEventSink = events
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    speechEventSink = null
+                }
+            }
+        )
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SPEECH_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "startListening" -> {
+                    val lang = call.argument<String>("language") ?: "gu-IN"
+                    startSpeechListening(lang)
+                    result.success(true)
+                }
+                "stopListening" -> {
+                    stopSpeechListening()
+                    result.success(true)
+                }
+                "cancelListening" -> {
+                    cancelSpeechListening()
+                    result.success(true)
+                }
+                "isAvailable" -> {
+                    result.success(SpeechRecognizer.isRecognitionAvailable(this))
+                }
+                else -> result.notImplemented()
+            }
+        }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
@@ -165,6 +210,28 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        isAppInForeground = true
+        if (FloatingPetService.isRunning) {
+            val intent = Intent(this, FloatingPetService::class.java).apply {
+                action = FloatingPetService.ACTION_HIDE_OVERLAY
+            }
+            startService(intent)
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        isAppInForeground = false
+        if (FloatingPetService.isRunning) {
+            val intent = Intent(this, FloatingPetService::class.java).apply {
+                action = FloatingPetService.ACTION_SHOW_OVERLAY
+            }
+            startService(intent)
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         isAppInForeground = true
@@ -184,6 +251,84 @@ class MainActivity : FlutterActivity() {
                 action = FloatingPetService.ACTION_SHOW_OVERLAY
             }
             startService(intent)
+        }
+    }
+
+    private fun startSpeechListening(language: String) {
+        Handler(Looper.getMainLooper()).post {
+            try {
+                speechRecognizer?.destroy()
+                val recognizer = SpeechRecognizer.createSpeechRecognizer(this)
+                speechRecognizer = recognizer
+
+                recognizer.setRecognitionListener(object : RecognitionListener {
+                    override fun onReadyForSpeech(params: Bundle?) {
+                        speechEventSink?.success(mapOf("event" to "ready"))
+                    }
+
+                    override fun onBeginningOfSpeech() {
+                        speechEventSink?.success(mapOf("event" to "speech_started"))
+                    }
+
+                    override fun onRmsChanged(rmsdB: Float) {
+                        speechEventSink?.success(mapOf("event" to "rms", "rms" to rmsdB))
+                    }
+
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+
+                    override fun onEndOfSpeech() {
+                        speechEventSink?.success(mapOf("event" to "end_of_speech"))
+                    }
+
+                    override fun onError(error: Int) {
+                        speechEventSink?.success(mapOf("event" to "error", "error" to error))
+                    }
+
+                    override fun onResults(results: Bundle?) {
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        val text = if (!matches.isNullOrEmpty()) matches[0] else ""
+                        speechEventSink?.success(mapOf("event" to "final", "text" to text))
+                    }
+
+                    override fun onPartialResults(partialResults: Bundle?) {
+                        val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        val text = if (!matches.isNullOrEmpty()) matches[0] else ""
+                        if (text.isNotEmpty()) {
+                            speechEventSink?.success(mapOf("event" to "partial", "text" to text))
+                        }
+                    }
+
+                    override fun onEvent(eventType: Int, params: Bundle?) {}
+                })
+
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                }
+                recognizer.startListening(intent)
+            } catch (e: Exception) {
+                speechEventSink?.success(mapOf("event" to "error", "message" to (e.message ?: "Failed to start speech recognizer")))
+            }
+        }
+    }
+
+    private fun stopSpeechListening() {
+        Handler(Looper.getMainLooper()).post {
+            try {
+                speechRecognizer?.stopListening()
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun cancelSpeechListening() {
+        Handler(Looper.getMainLooper()).post {
+            try {
+                speechRecognizer?.cancel()
+                speechRecognizer?.destroy()
+                speechRecognizer = null
+            } catch (_: Exception) {}
         }
     }
 }

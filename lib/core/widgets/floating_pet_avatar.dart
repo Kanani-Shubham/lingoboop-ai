@@ -130,7 +130,7 @@ class _FloatingPetAvatarState extends State<FloatingPetAvatar> {
       },
       onPanUpdate: (details) {
         _totalPanDistance += details.delta.distance;
-        if (_totalPanDistance > 8.0) {
+        if (_totalPanDistance > 6.0) {
           _isDragging = true;
           widget.onDragUpdate(details.delta);
         }

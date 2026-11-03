@@ -132,8 +132,10 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
     if (currentMode == 'walk') {
       final d = _tx - newX;
       if (d.abs() < 4.0 || _nowMs > _until) {
+        newX = _tx;
         ref.read(companionProvider.notifier).setPetMode('idle');
         _until = _nowMs + 1500 + (_random.nextDouble() * 2500).toInt();
+        needsUpdate = true;
       } else {
         final sign = d.sign;
         newX += sign * 58.0 * dt;
@@ -179,16 +181,15 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
     _isCustomPositioned = false;
     _side = (_petPos.dx + 75.0 < screenWidth / 2.0) ? 'r' : 'l';
     _tx = (_side == 'r') ? -24.0 : (screenWidth - 126.0);
-    setState(() {
-      _petPos = Offset(_tx, _floor(MediaQuery.of(context).size.height));
-    });
-    ref.read(companionProvider.notifier).setPetMode('talk');
+    ref.read(companionProvider.notifier).setPetMode('walk');
+    _until = _nowMs + 4000;
     ref.read(companionProvider.notifier).openCard();
   }
 
   void _closeCard() {
     ref.read(companionProvider.notifier).closeCard();
     ref.read(companionProvider.notifier).setPetMode('idle');
+    _facing = 0.5;
     _until = _nowMs + 1200;
   }
 
@@ -215,10 +216,8 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
         _isCustomPositioned = false;
         _side = (_petPos.dx + 75.0 < screenW / 2.0) ? 'r' : 'l';
         _tx = (_side == 'r') ? -24.0 : (screenW - 126.0);
-        setState(() {
-          _petPos = Offset(_tx, _floor(screenH));
-          _facing = (_side == 'r') ? 0.9 : -0.9;
-        });
+        notifier.setPetMode('walk');
+        _until = _nowMs + 4000;
       } else if (!current.isCardOpen && (previous?.isCardOpen ?? false)) {
         setState(() {
           _facing = 0.5;
@@ -258,13 +257,12 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
               child: const PetSettingsSheet(),
             ),
 
-          // 3. Persistent Floating PolyCard Dialogue (#cd)
+          // 3. Persistent Floating PolyCard Dialogue (#cd) matching exact prototype docking
           if (companionState.isCardOpen)
             Positioned(
-              left: _side == 'r'
-                  ? (_petPos.dx + 132.0).clamp(12.0, screenW - 276.0)
-                  : (_petPos.dx - 264.0 + 18.0).clamp(12.0, screenW - 276.0),
-              top: (_petPos.dy - 120.0).clamp(50.0, screenH - 440.0),
+              left: _side == 'r' ? 108.0 : null,
+              right: _side == 'r' ? null : 108.0,
+              bottom: 76.0 + MediaQuery.of(context).viewInsets.bottom,
               child: const LingoCardWidget(),
             ),
 
@@ -282,6 +280,9 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
               dockSide: _side,
               onTap: () => _toggleCard(screenW),
               onDragUpdate: (delta) {
+                if (companionState.isCardOpen) {
+                  _closeCard();
+                }
                 _isCustomPositioned = true;
                 final newX = (_petPos.dx + delta.dx).clamp(-30.0, screenW - 120.0);
                 final newY = (_petPos.dy + delta.dy).clamp(40.0, screenH - 180.0);
@@ -289,7 +290,7 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
                 setState(() {
                   _petPos = Offset(newX, newY);
                   _side = newSide;
-                  _facing = companionState.isCardOpen ? (_side == 'r' ? 0.9 : -0.9) : 0.5;
+                  _facing = 0.5;
                 });
                 notifier.setPetMode('drag');
               },

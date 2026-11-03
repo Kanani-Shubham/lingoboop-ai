@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
@@ -12,6 +13,10 @@ import 'auth_service.dart';
 class SpeechService {
   SpeechService._();
   static final SpeechService instance = SpeechService._();
+
+  static const MethodChannel _speechChannel = MethodChannel('com.lingoboop.app/speech');
+  static const EventChannel _speechEventChannel = EventChannel('com.lingoboop.app/speech_events');
+  Stream<Map<String, dynamic>>? _speechEventsStream;
 
   AudioRecorder? _recorder;
   AudioPlayer? _player;
@@ -24,6 +29,64 @@ class SpeechService {
   String? _currentRecordingPath;
 
   bool get isRecording => _isRecording;
+
+  /// Stream of real-time native speech events (partial, final, error, ready)
+  Stream<Map<String, dynamic>> get liveSpeechEvents {
+    return _speechEventsStream ??= _speechEventChannel
+        .receiveBroadcastStream()
+        .map((event) => Map<String, dynamic>.from(event as Map));
+  }
+
+  /// Start live real-time speech recognition with partial interim results
+  Future<bool> startLiveRecognition(String languageCode) async {
+    try {
+      var status = await Permission.microphone.status;
+      if (!status.isGranted) {
+        status = await Permission.microphone.request();
+      }
+      if (!status.isGranted) {
+        debugPrint('[SpeechService] Microphone permission denied');
+        return false;
+      }
+
+      if (Platform.isAndroid) {
+        final ok = await _speechChannel.invokeMethod<bool>('startListening', {
+          'language': languageCode,
+        });
+        _isRecording = true;
+        return ok ?? false;
+      } else {
+        return await startRecording();
+      }
+    } catch (e) {
+      debugPrint('[SpeechService] startLiveRecognition error: $e, falling back to audio recording');
+      return await startRecording();
+    }
+  }
+
+  /// Stop live speech recognition
+  Future<void> stopLiveRecognition() async {
+    _isRecording = false;
+    if (Platform.isAndroid) {
+      try {
+        await _speechChannel.invokeMethod('stopListening');
+      } catch (_) {}
+    } else {
+      await stopRecording();
+    }
+  }
+
+  /// Cancel live speech recognition
+  Future<void> cancelLiveRecognition() async {
+    _isRecording = false;
+    if (Platform.isAndroid) {
+      try {
+        await _speechChannel.invokeMethod('cancelListening');
+      } catch (_) {}
+    } else {
+      await stopRecording();
+    }
+  }
 
   Map<String, String> _buildHeaders({bool isJson = true}) {
     final headers = <String, String>{};
