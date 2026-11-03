@@ -68,3 +68,4 @@ Available voice options in **Settings > Voice Character**:
 - **Language Selector:** Users can select preview phrases in English (`en-IN`), Gujarati (`gu-IN`), or Hindi (`hi-IN`).
 - **Interactive "Play Demo" Button:** Synthesizes the sample phrase in real-time, displays a circular loading spinner while fetching, and plays with an active playing badge that can be toggled to stop mid-playback.
 - **Strict Independence:** Switching the companion pet in the Companion/Language modal does not touch `selectedVoice`. Switching the voice in Settings does not touch `activePet`.
+
