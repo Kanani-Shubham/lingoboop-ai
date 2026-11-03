@@ -7,6 +7,7 @@ import '../../../core/constants/language_data.dart';
 import '../../../core/services/overlay_service.dart';
 import '../../../core/services/speech_service.dart';
 import '../../../core/services/user_data_service.dart';
+import '../../../core/utils/pronunciation_scorer.dart';
 import '../../../core/widgets/karaoke_lyrics_view.dart';
 
 class CompanionState {
@@ -505,36 +506,37 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
       userSpoken = transcript ?? '';
     }
 
-    // Tokenize user words for genuine comparison
-    final userTokens = userSpoken
-        .toLowerCase()
-        .split(RegExp(r'\s+'))
-        .map((w) => w.replaceAll(RegExp(r'[^\w]'), ''))
-        .where((w) => w.isNotEmpty)
-        .toSet();
+    // Evaluate with deterministic PronunciationScorer
+    final scoring = PronunciationScorer.evaluate(
+      expectedSentence: state.translatedText,
+      spokenTranscript: userSpoken,
+    );
 
-    // Evaluate each target word honestly
-    int matchedCount = 0;
+    if (!scoring.hasSpoken) {
+      state = state.copyWith(
+        statusNote: 'Could not capture clear speech. Tap mic to try again.',
+        petMode: 'idle',
+      );
+      return;
+    }
+
     final evaluatedWords = state.words.map((w) {
-      final cleanTarget = w.text.toLowerCase().replaceAll(RegExp(r'[^\w]'), '');
-      final isMatched = userTokens.contains(cleanTarget);
-      if (isMatched) matchedCount++;
+      final clean = PronunciationScorer.tokenize(w.text);
+      final wordKey = clean.isNotEmpty ? clean.first : w.text.toLowerCase();
+      final isMatched = scoring.matchedWords.contains(wordKey);
       return w.copyWith(
         isHighlighted: true,
         evaluation: isMatched ? WordEvaluationState.ok : WordEvaluationState.miss,
       );
     }).toList();
 
-    final total = evaluatedWords.isEmpty ? 1 : evaluatedWords.length;
-    final score = (matchedCount / total) * 100.0;
+    final score = scoring.matchPercentage.toDouble();
     final allOk = score >= 80.0;
 
     state = state.copyWith(
       words: evaluatedWords,
-      statusNote: allOk
-          ? 'Excellent! ${score.toInt()}% matched.'
-          : '${score.toInt()}% matched. Check missed words and try again.',
-      petMode: allOk ? 'dance' : 'oops',
+      statusNote: scoring.feedbackMessage,
+      petMode: allOk ? 'dance' : (score >= 50.0 ? 'talk' : 'oops'),
     );
 
     // Record pronunciation feedback in database

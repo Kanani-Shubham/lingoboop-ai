@@ -240,6 +240,15 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
             children: _screens,
           ),
 
+          // Dismissal barrier when PolyCard is open
+          if (companionState.isCardOpen)
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: _closeCard,
+              ),
+            ),
+
           // 2. Persistent Settings Sheet Dropdown
           if (companionState.isSettingsOpen)
             Positioned(
@@ -253,9 +262,9 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
           if (companionState.isCardOpen)
             Positioned(
               left: _side == 'r'
-                  ? (_petPos.dx + 132.0).clamp(12.0, screenW - 244.0)
-                  : (_petPos.dx - 232.0 + 18.0).clamp(12.0, screenW - 244.0),
-              top: (_petPos.dy - 120.0).clamp(50.0, screenH - 420.0),
+                  ? (_petPos.dx + 132.0).clamp(12.0, screenW - 276.0)
+                  : (_petPos.dx - 264.0 + 18.0).clamp(12.0, screenW - 276.0),
+              top: (_petPos.dy - 120.0).clamp(50.0, screenH - 440.0),
               child: const LingoCardWidget(),
             ),
 
@@ -303,6 +312,9 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
         currentIndex: _currentIndex,
         activeAccentColor: companionState.activePet.accentColor,
         onTabSelected: (index) {
+          if (companionState.isCardOpen) {
+            _closeCard();
+          }
           setState(() => _currentIndex = index);
         },
       ),

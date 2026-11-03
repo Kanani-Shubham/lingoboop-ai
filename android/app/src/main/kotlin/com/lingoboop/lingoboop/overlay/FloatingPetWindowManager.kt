@@ -51,6 +51,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
     private var petAccentColor: Int = Color.parseColor("#c4571c")
     private var sourceLanguage: String = "gu-IN"
     private var targetLanguage: String = "en-US"
+    private var authToken: String? = null
 
     private var tts: TextToSpeech? = null
     private var isTtsReady = false
@@ -95,6 +96,12 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
         }
         sourceLanguage = prefs.getString("source_lang", "gu-IN") ?: "gu-IN"
         targetLanguage = prefs.getString("target_lang", "en-US") ?: "en-US"
+        authToken = prefs.getString("auth_token", null)
+    }
+
+    fun updateAuthToken(token: String?) {
+        authToken = token
+        prefs.edit().putString("auth_token", token).apply()
     }
 
     fun updatePet(key: String, name: String, colorHex: String) {
@@ -454,7 +461,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
         windowManager.defaultDisplay.getMetrics(dm)
 
         val sizePx = dpToPx(150)
-        val panelWidth = dpToPx(232)
+        val panelWidth = (dm.widthPixels * 0.76).toInt().coerceIn(dpToPx(270), dpToPx(296))
         val panelHeight = dpToPx(340)
 
         val isLeftSide = petP.x + sizePx / 2 < dm.widthPixels / 2
@@ -497,8 +504,8 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
 
         val petP = petParams ?: return
         val sizePx = dpToPx(150)
-        // Exact prototype PolyCard width: 232px
-        val panelWidth = dpToPx(232)
+        // Responsive PolyCard width to prevent control clipping
+        val panelWidth = (dm.widthPixels * 0.76).toInt().coerceIn(dpToPx(270), dpToPx(296))
         val panelHeight = dpToPx(340)
 
         val isLeftSide = petP.x + sizePx / 2 < dm.widthPixels / 2
@@ -573,7 +580,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                 cornerRadius = dpToPx(22).toFloat() // border-radius: 22px
             }
             background = bg
-            setPadding(dpToPx(14), dpToPx(14), dpToPx(14), dpToPx(14)) // padding: 14px
+            setPadding(dpToPx(12), dpToPx(14), dpToPx(12), dpToPx(14)) // padding: 12px
             elevation = dpToPx(16).toFloat()
         }
 
@@ -640,9 +647,9 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
 
         // 3. Translated Karaoke View (#lyr)
         val translated = TextView(context).apply {
-            text = "Welcome to LingoBoom!"
+            text = "Welcome to LingoBoop!"
             setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 19f)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             setPadding(0, dpToPx(4), 0, dpToPx(6))
         }
@@ -663,6 +670,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
         val controls = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            clipChildren = false
             setPadding(0, dpToPx(4), 0, dpToPx(8))
         }
 
@@ -677,7 +685,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
             startVoiceRecognition()
         }
 
-        // #mic: 50x50 circle with white background and accent icon
+        // #mic: 38x38 circle with white background and accent icon
         val mic = ImageButton(context).apply {
             setImageResource(android.R.drawable.ic_btn_speak_now)
             val micBg = GradientDrawable().apply {
@@ -686,8 +694,8 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
             }
             background = micBg
             setColorFilter(petAccentColor)
-            layoutParams = LinearLayout.LayoutParams(dpToPx(46), dpToPx(46)).apply {
-                setMargins(dpToPx(6), 0, 0, 0)
+            layoutParams = LinearLayout.LayoutParams(dpToPx(38), dpToPx(38)).apply {
+                setMargins(dpToPx(4), 0, dpToPx(2), 0)
             }
             setOnClickListener {
                 startVoiceRecognition()
@@ -782,12 +790,12 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                 cornerRadius = dpToPx(999).toFloat()
             }
             background = bg
-            setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6))
+            setPadding(dpToPx(7), dpToPx(5), dpToPx(7), dpToPx(5))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                setMargins(0, 0, dpToPx(6), 0)
+                setMargins(0, 0, dpToPx(3), 0)
             }
             setOnClickListener { onClick() }
         }
@@ -813,14 +821,18 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
             )
 
             for (baseUrl in candidates) {
+                // 1. Try AI tutor endpoint
                 try {
                     val url = java.net.URL("$baseUrl/api/v1/ai/tutor")
                     val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
                         requestMethod = "POST"
-                        connectTimeout = 2500
+                        connectTimeout = 3000
                         readTimeout = 8000
                         doOutput = true
                         setRequestProperty("Content-Type", "application/json")
+                        if (!authToken.isNullOrEmpty()) {
+                            setRequestProperty("Authorization", "Bearer $authToken")
+                        }
                     }
 
                     val payload = org.json.JSONObject().apply {
@@ -840,25 +852,72 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                         val json = org.json.JSONObject(responseStr)
                         if (json.optBoolean("success", false)) {
                             val data = json.optJSONObject("data")
-                            translatedText = data?.optString("translated_text")
+                            val cand = data?.optString("translated_text")
                                 ?: data?.optString("reply_text")
                                 ?: data?.optString("translation")
-                            tutorNote = data?.optString("explanation")
-                                ?: data?.optString("pronunciation_guide")
-                            break
+                            if (!cand.isNullOrBlank() && !cand.trim().equals(inputText.trim(), ignoreCase = true)) {
+                                translatedText = cand
+                                tutorNote = data?.optString("explanation")
+                                    ?: data?.optString("pronunciation_guide")
+                                break
+                            }
                         }
                     }
                 } catch (_: Exception) {
-                    // Try next candidate
+                    // Try direct translation endpoint next
                 }
+
+                // 2. Fallback to direct translation endpoint
+                if (translatedText == null) {
+                    try {
+                        val transUrl = java.net.URL("$baseUrl/api/v1/translation/translate")
+                        val transConn = (transUrl.openConnection() as java.net.HttpURLConnection).apply {
+                            requestMethod = "POST"
+                            connectTimeout = 3000
+                            readTimeout = 8000
+                            doOutput = true
+                            setRequestProperty("Content-Type", "application/json")
+                            if (!authToken.isNullOrEmpty()) {
+                                setRequestProperty("Authorization", "Bearer $authToken")
+                            }
+                        }
+
+                        val srcCode = sourceLanguage.split("-")[0].lowercase()
+                        val tgtCode = targetLanguage.split("-")[0].lowercase()
+                        val transPayload = org.json.JSONObject().apply {
+                            put("text", inputText)
+                            put("source_lang", srcCode)
+                            put("target_lang", tgtCode)
+                        }
+
+                        transConn.outputStream.use { os ->
+                            os.write(transPayload.toString().toByteArray(Charsets.UTF_8))
+                        }
+
+                        if (transConn.responseCode == 200) {
+                            val resStr = transConn.inputStream.bufferedReader().use { it.readText() }
+                            val json = org.json.JSONObject(resStr)
+                            val cand = json.optString("translated_text")
+                            if (cand.isNotBlank() && !cand.trim().equals(inputText.trim(), ignoreCase = true)) {
+                                translatedText = cand
+                                break
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+
+                if (translatedText != null) break
             }
 
             Handler(Looper.getMainLooper()).post {
-                val finalTranslation = translatedText ?: inputText
+                val finalTranslation = translatedText ?: "Translation unavailable. Tap to retry."
+                val finalStatus = tutorNote ?: (if (translatedText != null) "Tap play to hear pronunciation" else "Check connection and tap Go to retry.")
                 tvTranslated?.text = finalTranslation
-                tvStatus?.text = tutorNote ?: "Tap play to hear pronunciation"
+                tvStatus?.text = finalStatus
                 petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('talk');")
-                speakCurrentTranslation(1.0f)
+                if (translatedText != null) {
+                    speakCurrentTranslation(1.0f)
+                }
             }
         }.start()
     }

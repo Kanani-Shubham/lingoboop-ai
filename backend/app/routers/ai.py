@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends
 from app.ai.schemas.ai_schemas import (
     AITutorRequest,
     AITutorResponse,
+    DailyPracticeRequest,
+    DailyPracticeResponse,
     GrammarCorrectionRequest,
     GrammarCorrectionResponse,
 )
@@ -45,6 +47,25 @@ async def translate_endpoint(
     request.mode = "translate"
 
     result = await ai_service.tutor_interaction(request)
+
+    return APIResponse(
+        success=True,
+        data=result.model_dump(),
+    )
+
+
+@router.post("/daily-practice", response_model=APIResponse)
+async def daily_practice_endpoint(
+    request: DailyPracticeRequest,
+    client_id: str = Depends(verify_client_token),
+):
+    """
+    Generates 20-30 everyday spoken practice sentences customized by native/target language pair
+    and proficiency level.
+    """
+    rate_limiter.check_rate_limit(client_id)
+
+    result = await ai_service.generate_daily_practice(request)
 
     return APIResponse(
         success=True,

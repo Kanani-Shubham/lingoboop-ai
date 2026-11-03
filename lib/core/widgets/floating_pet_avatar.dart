@@ -117,65 +117,98 @@ class _FloatingPetAvatarState extends State<FloatingPetAvatar> {
     }
   }
 
+  double _totalPanDistance = 0.0;
+  bool _isDragging = false;
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: widget.onTap,
-      onPanUpdate: (details) => widget.onDragUpdate(details.delta),
-      onPanEnd: (_) => widget.onDragEnd(),
-      child: Stack(
-        clipBehavior: Clip.none,
-        alignment: Alignment.center,
-        children: [
-          // 3D Pet Character Preview (unclipped, fully transparent canvas)
-          SizedBox(
-            width: widget.size,
-            height: widget.size,
-            child: _webController != null && !kIsWeb
-                ? IgnorePointer(
-                    child: WebViewWidget(controller: _webController!),
-                  )
-                : Image.asset(
-                    widget.character.previewAsset,
-                    fit: BoxFit.contain,
-                    filterQuality: FilterQuality.high,
-                  ),
-          ),
-
-          // "Tap me to talk" Hint pill matching prototype .hint
-          if (widget.showHint && !widget.isCardOpen)
-            Positioned(
-              top: 8,
-              left: widget.size / 2 - 20,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(14),
-                    topRight: Radius.circular(14),
-                    bottomRight: Radius.circular(14),
-                    bottomLeft: Radius.circular(3),
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Color(0x33000000), // 0 4px 12px #0003
-                      blurRadius: 12,
-                      offset: Offset(0, 4),
+      behavior: HitTestBehavior.opaque,
+      onPanDown: (details) {
+        _totalPanDistance = 0.0;
+        _isDragging = false;
+      },
+      onPanUpdate: (details) {
+        _totalPanDistance += details.delta.distance;
+        if (_totalPanDistance > 8.0) {
+          _isDragging = true;
+          widget.onDragUpdate(details.delta);
+        }
+      },
+      onPanEnd: (_) {
+        if (_isDragging) {
+          widget.onDragEnd();
+        } else {
+          widget.onTap();
+        }
+        _isDragging = false;
+        _totalPanDistance = 0.0;
+      },
+      onPanCancel: () {
+        if (_isDragging) {
+          widget.onDragEnd();
+        }
+        _isDragging = false;
+        _totalPanDistance = 0.0;
+      },
+      child: Container(
+        width: widget.size,
+        height: widget.size,
+        color: Colors.transparent, // Ensures 100% opaque hit test surface
+        child: Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.center,
+          children: [
+            // 3D Pet Character Preview (unclipped, fully transparent canvas)
+            SizedBox(
+              width: widget.size,
+              height: widget.size,
+              child: _webController != null && !kIsWeb
+                  ? IgnorePointer(
+                      child: WebViewWidget(controller: _webController!),
+                    )
+                  : Image.asset(
+                      widget.character.previewAsset,
+                      fit: BoxFit.contain,
+                      filterQuality: FilterQuality.high,
                     ),
-                  ],
-                ),
-                child: Text(
-                  'Tap me to talk',
-                  style: GoogleFonts.fredoka(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.textDark,
+            ),
+
+            // "Tap me to talk" Hint pill matching prototype .hint
+            if (widget.showHint && !widget.isCardOpen)
+              Positioned(
+                top: 8,
+                left: widget.size / 2 - 20,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(14),
+                      topRight: Radius.circular(14),
+                      bottomRight: Radius.circular(14),
+                      bottomLeft: Radius.circular(3),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Color(0x33000000), // 0 4px 12px #0003
+                        blurRadius: 12,
+                        offset: Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    'Tap me to talk',
+                    style: GoogleFonts.fredoka(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.textDark,
+                    ),
                   ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }

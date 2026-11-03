@@ -9,6 +9,7 @@ import '../../features/history/presentation/history_screen.dart';
 import '../../features/navigation/presentation/main_navigation_shell.dart';
 import '../../features/onboarding/presentation/goal_setup_screen.dart';
 import '../../features/onboarding/presentation/language_select_screen.dart';
+import '../../features/practice/presentation/daily_practice_screen.dart';
 import '../../features/profile/presentation/profile_screen.dart';
 import '../../features/progress/presentation/progress_screen.dart';
 import '../../features/settings/presentation/settings_screen.dart';
@@ -27,6 +28,7 @@ class AppRouter {
     '/settings',
     '/history',
     '/pets',
+    '/daily-practice',
   };
 
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
@@ -66,6 +68,8 @@ class AppRouter {
         return MaterialPageRoute(builder: (_) => const SettingsScreen());
       case '/history':
         return MaterialPageRoute(builder: (_) => const HistoryScreen());
+      case '/daily-practice':
+        return MaterialPageRoute(builder: (_) => const DailySpeakingPracticeScreen());
       default:
         return MaterialPageRoute(
           builder: (_) => Scaffold(

@@ -6,6 +6,9 @@ from app.ai.schemas.ai_schemas import (
     AITutorRequest,
     AITutorResponse,
     ConversationTurn,
+    DailyPracticeItem,
+    DailyPracticeRequest,
+    DailyPracticeResponse,
     GrammarCorrectionRequest,
     GrammarCorrectionResponse,
     VocabularyItem,
@@ -193,6 +196,135 @@ YOU MUST ALWAYS RESPOND IN STRICT VALID JSON MATCHING THIS EXACT SCHEMA:
             conversation_mode="resilient_mode",
             provider="groq_fallback",
             model=settings.GROQ_MODEL,
+        )
+
+
+    async def generate_daily_practice(self, req: DailyPracticeRequest) -> DailyPracticeResponse:
+        """Generates 20-30 curated, everyday spoken sentences for daily practice."""
+        import datetime
+        today_str = datetime.date.today().isoformat()
+
+        native_lang_code = req.native_language.lower().split("-")[0]
+        target_lang_code = req.target_language.lower().split("-")[0]
+        native_lang_name = LANGUAGE_NAMES.get(native_lang_code, req.native_language)
+        target_lang_name = LANGUAGE_NAMES.get(target_lang_code, req.target_language)
+
+        category_instruction = (
+            f"Focus particularly on category: {req.category}."
+            if req.category
+            else "Include an even mix across: daily conversation, self-introduction, shopping, ordering food, asking directions, travel, education, workplace, friends, phone, and common questions."
+        )
+
+        if not settings.is_groq_configured():
+            return self._build_offline_daily_practice(req, today_str)
+
+        prompt = f"""You are an elite multilingual language curriculum architect for LingoBoom.
+Generate exactly {req.count} practical everyday speaking practice sentences for a learner at '{req.proficiency_level}' level.
+The learner's native language is {native_lang_name} ({req.native_language}) and target language is {target_lang_name} ({req.target_language}).
+{category_instruction}
+
+Each sentence MUST be natural, commonly spoken in real life, and grammatically impeccable.
+Avoid repetitive templates. Ensure sentences range from simple everyday exchanges to expressive phrases.
+
+YOU MUST RESPOND ONLY IN STRICT VALID JSON MATCHING THIS EXACT FORMAT:
+{{
+  "date": "{today_str}",
+  "native_language": "{req.native_language}",
+  "target_language": "{req.target_language}",
+  "proficiency_level": "{req.proficiency_level}",
+  "sentences": [
+    {{
+      "id": "practice_1",
+      "target_sentence": "Where is the nearest railway station?",
+      "native_translation": "નજીકનું રેલવે સ્ટેશન ક્યાં છે?",
+      "category": "Asking Directions",
+      "difficulty": "{req.proficiency_level}",
+      "pronunciation_guide": "Where iz the neer-est rayl-way stay-shun?",
+      "context_tip": "Use this when asking for directions in public places."
+    }}
+  ]
+}}"""
+
+        try:
+            raw_content = await self.provider.chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                model=settings.GROQ_MODEL,
+                temperature=0.3,
+                max_tokens=3000,
+                response_format={"type": "json_object"},
+            )
+            parsed_data = self._clean_and_parse_json(raw_content)
+            items = []
+            for idx, item in enumerate(parsed_data.get("sentences", [])):
+                if isinstance(item, dict) and "target_sentence" in item:
+                    items.append(
+                        DailyPracticeItem(
+                            id=item.get("id") or f"sent_{idx+1}",
+                            target_sentence=item.get("target_sentence", "").strip(),
+                            native_translation=item.get("native_translation", "").strip(),
+                            category=item.get("category", "General"),
+                            difficulty=item.get("difficulty", req.proficiency_level),
+                            pronunciation_guide=item.get("pronunciation_guide"),
+                            context_tip=item.get("context_tip"),
+                        )
+                    )
+            if items:
+                return DailyPracticeResponse(
+                    date=today_str,
+                    native_language=req.native_language,
+                    target_language=req.target_language,
+                    proficiency_level=req.proficiency_level,
+                    sentences=items,
+                )
+        except Exception as e:
+            pass
+
+        return self._build_offline_daily_practice(req, today_str)
+
+    def _build_offline_daily_practice(self, req: DailyPracticeRequest, today_str: str) -> DailyPracticeResponse:
+        """Curated offline fallback set of practical everyday sentences."""
+        curated_base = [
+            ("Where is the nearest railway station?", "નજીકનું રેલવે સ્ટેશન ક્યાં છે?", "Asking Directions"),
+            ("Please give me two cups of hot tea.", "કૃપા કરીને મને બે કપ ગરમ ચા આપો.", "Ordering Food"),
+            ("My name is Shubham, and I am learning English.", "મારું નામ શુભમ છે, અને હું અંગ્રેજી શીખી રહ્યો છું.", "Self-Introduction"),
+            ("How much does this cost?", "આ કેટલાનું છે?", "Shopping"),
+            ("Could you please speak a little slower?", "શું તમે થોડું ધીમે બોલી શકશો?", "Daily Conversation"),
+            ("I need help with my luggage.", "મને મારા સામાનમાં મદદ જોઈએ છે.", "Travel"),
+            ("Can I get the bill, please?", "શું મને બિલ મળી શકે?", "Ordering Food"),
+            ("What time does the store open?", "દુકાન કેટલા વાગ્યે ખુલે છે?", "Shopping"),
+            ("It is very nice to meet you.", "તમને મળીને ઘણો આનંદ થયો.", "Self-Introduction"),
+            ("Could you repeat that once more?", "શું તમે એક વાર ફરીથી બોલશો?", "Daily Conversation"),
+            ("I am looking for the entrance.", "હું પ્રવેશદ્વાર શોધી રહ્યો છું.", "Asking Directions"),
+            ("I have an interview today.", "આજે મારો ઇન્ટરવ્યુ છે.", "Interviews"),
+            ("Let's schedule a meeting tomorrow.", "ચાલો આવતીકાલે મીટિંગ રાખીએ.", "Workplace Communication"),
+            ("What are your plans for the weekend?", "વીકએન્ડ માટે તમારું શું પ્લાન છે?", "Friends & Social"),
+            ("I will call you back in ten minutes.", "હું તમને દસ મિનિટમાં પાછો ફોન કરું છું.", "Phone Conversations"),
+            ("Could you explain this topic to me?", "શું તમે મને આ વિષય સમજાવી શકશો?", "Education"),
+            ("Where can I find drinking water?", "પીવાનું પાણી ક્યાં મળશે?", "Asking Directions"),
+            ("I would like to order a vegetarian meal.", "હું શાકાહારી ભોજન ઓર્ડર કરવા માંગુ છું.", "Ordering Food"),
+            ("Thank you very much for your kind help.", "તમારી મદદ માટે ખૂબ ખૂબ આભાર.", "Daily Conversation"),
+            ("Have a wonderful day ahead!", "તમારો દિવસ શુભ રહે!", "Friends & Social"),
+        ]
+
+        items = [
+            DailyPracticeItem(
+                id=f"curated_{i+1}",
+                target_sentence=target,
+                native_translation=native,
+                category=cat,
+                difficulty=req.proficiency_level,
+                pronunciation_guide=None,
+                context_tip=f"Everyday spoken phrase for {cat}.",
+            )
+            for i, (target, native, cat) in enumerate(curated_base[: req.count])
+        ]
+
+        return DailyPracticeResponse(
+            date=today_str,
+            native_language=req.native_language,
+            target_language=req.target_language,
+            proficiency_level=req.proficiency_level,
+            sentences=items,
         )
 
 

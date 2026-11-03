@@ -125,3 +125,4 @@ async def test_cross_user_isolation():
     assert verified_b == USER_B_ID
     assert verified_a != USER_B_ID
     assert verified_b != USER_A_ID
+

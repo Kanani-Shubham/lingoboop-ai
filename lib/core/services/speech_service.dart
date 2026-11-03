@@ -301,11 +301,12 @@ class SpeechService {
           final audioB64 = decoded['data']['audio_base64'] as String?;
           if (audioB64 != null && audioB64.isNotEmpty) {
             final audioBytes = base64Decode(audioB64);
+            final paddedBytes = _prependSilenceToWav(Uint8List.fromList(audioBytes), silenceMs: 120);
             final tempDir = await getTemporaryDirectory();
             final filePath = '${tempDir.path}/lingo_tts_${DateTime.now().millisecondsSinceEpoch}.wav';
             final ttsFile = File(filePath);
-            await ttsFile.writeAsBytes(audioBytes);
-            debugPrint('[SpeechService] TTS synthesized saved to $filePath');
+            await ttsFile.writeAsBytes(paddedBytes);
+            debugPrint('[SpeechService] TTS synthesized saved to $filePath (120ms DAC lead-in silence applied)');
             return filePath;
           }
         }
@@ -316,16 +317,162 @@ class SpeechService {
     return null;
   }
 
-  /// Play audio file with specific playback rate (e.g. 1.0 normal or 0.7 slow)
+  /// Prepends safe lead-in silence to WAV PCM data to prevent hardware audio DAC ramp-up from cutting off the first word
+  Uint8List _prependSilenceToWav(Uint8List wavBytes, {int silenceMs = 120}) {
+    if (wavBytes.length < 44) return wavBytes;
+    if (wavBytes[0] != 0x52 || wavBytes[1] != 0x49 || wavBytes[2] != 0x46 || wavBytes[3] != 0x46) {
+      return wavBytes; // Not RIFF
+    }
+
+    int dataIndex = -1;
+    for (int i = 12; i < wavBytes.length - 8; i++) {
+      if (wavBytes[i] == 0x64 &&
+          wavBytes[i + 1] == 0x61 &&
+          wavBytes[i + 2] == 0x74 &&
+          wavBytes[i + 3] == 0x61) {
+        dataIndex = i;
+        break;
+      }
+    }
+    if (dataIndex == -1) return wavBytes;
+
+    final byteData = ByteData.sublistView(wavBytes);
+    final sampleRate = byteData.getUint32(24, Endian.little);
+    final channels = byteData.getUint16(22, Endian.little);
+    final bitsPerSample = byteData.getUint16(34, Endian.little);
+
+    final safeSampleRate = (sampleRate >= 8000 && sampleRate <= 48000) ? sampleRate : 16000;
+    final safeChannels = (channels >= 1 && channels <= 2) ? channels : 1;
+    final safeBits = (bitsPerSample == 8 || bitsPerSample == 16 || bitsPerSample == 24 || bitsPerSample == 32)
+        ? bitsPerSample
+        : 16;
+
+    final bytesPerMs = ((safeSampleRate * safeChannels * (safeBits ~/ 8)) / 1000.0).round();
+    final silenceBytesCount = bytesPerMs * silenceMs;
+
+    final oldDataSize = byteData.getUint32(dataIndex + 4, Endian.little);
+    final oldRiffSize = byteData.getUint32(4, Endian.little);
+
+    final newBytes = Uint8List(wavBytes.length + silenceBytesCount);
+    newBytes.setRange(0, dataIndex + 8, wavBytes);
+
+    final newByteData = ByteData.sublistView(newBytes);
+    newByteData.setUint32(4, oldRiffSize + silenceBytesCount, Endian.little);
+    newByteData.setUint32(dataIndex + 4, oldDataSize + silenceBytesCount, Endian.little);
+
+    newBytes.setRange(dataIndex + 8 + silenceBytesCount, newBytes.length, wavBytes, dataIndex + 8);
+    return newBytes;
+  }
+
+  /// Play audio file with specific playback rate (e.g. 1.0 normal or 0.7 slow) with buffering check
   Future<void> playAudioFile(String filePath, {double speed = 1.0}) async {
     try {
       await player.stop();
       await player.setFilePath(filePath);
       await player.setSpeed(speed);
+      if (player.processingState != ProcessingState.ready &&
+          player.processingState != ProcessingState.buffering) {
+        await player.processingStateStream
+            .firstWhere((s) => s == ProcessingState.ready)
+            .timeout(const Duration(milliseconds: 300), onTimeout: () => ProcessingState.ready);
+      }
       await player.play();
     } catch (e) {
       debugPrint('[SpeechService] Audio playback error: $e');
     }
+  }
+
+  /// Fetch daily spoken practice sentences from backend Groq AI service with offline fallback
+  Future<List<Map<String, dynamic>>> fetchDailyPractice({
+    String nativeLang = 'gu-IN',
+    String targetLang = 'en-US',
+    String proficiencyLevel = 'beginner',
+    int count = 20,
+    String? category,
+  }) async {
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        final url = Uri.parse('$_backendBaseUrl/api/v1/ai/daily-practice');
+        final resp = await http
+            .post(
+              url,
+              headers: _buildHeaders(),
+              body: jsonEncode({
+                'native_language': nativeLang,
+                'target_language': targetLang,
+                'proficiency_level': proficiencyLevel,
+                'count': count,
+                'category': category,
+              }),
+            )
+            .timeout(const Duration(seconds: 15));
+
+        if (resp.statusCode == 200) {
+          final decoded = jsonDecode(resp.body) as Map<String, dynamic>;
+          if (decoded['success'] == true && decoded['data'] != null) {
+            final sentences = decoded['data']['sentences'] as List<dynamic>?;
+            if (sentences != null && sentences.isNotEmpty) {
+              return sentences.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('[SpeechService] Daily practice request error (attempt $attempt): $e');
+        if (attempt == 0) await resolveBackendUrl();
+      }
+    }
+
+    return _offlineDailyPracticeSet(targetLang, nativeLang);
+  }
+
+  List<Map<String, dynamic>> _offlineDailyPracticeSet(String tgt, String src) {
+    return [
+      {
+        'id': 'offline_1',
+        'target_sentence': 'Where is the nearest bus station?',
+        'native_translation': 'નજીકનું બસ સ્ટેશન ક્યાં છે?',
+        'category': 'Travel',
+        'difficulty': 'Easy',
+        'pronunciation_guide': 'wair iz thuh neer-ist bus stay-shun',
+        'context_tip': 'Useful for finding local transit.'
+      },
+      {
+        'id': 'offline_2',
+        'target_sentence': 'Could you please help me with these bags?',
+        'native_translation': 'શું તમે કૃપા કરીને આ બેગમાં મારી મદદ કરી શકશો?',
+        'category': 'Daily',
+        'difficulty': 'Easy',
+        'pronunciation_guide': 'kood yoo pleez help mee with theez bagz',
+        'context_tip': 'Polite request.'
+      },
+      {
+        'id': 'offline_3',
+        'target_sentence': 'I would like to order two coffees, please.',
+        'native_translation': 'હું કૃપા કરીને બે કોફી ઓર્ડર કરવા માંગુ છું.',
+        'category': 'Dining',
+        'difficulty': 'Easy',
+        'pronunciation_guide': 'eye wood lyk too or-der too kof-eez pleez',
+        'context_tip': 'Ordering at a cafe.'
+      },
+      {
+        'id': 'offline_4',
+        'target_sentence': 'What time does the morning flight depart?',
+        'native_translation': 'સવારની ફ્લાઇટ કેટલા વાગ્યે ઉપડે છે?',
+        'category': 'Travel',
+        'difficulty': 'Intermediate',
+        'pronunciation_guide': 'waht tyme duz thuh mor-ning flyte dee-part',
+        'context_tip': 'Airport queries.'
+      },
+      {
+        'id': 'offline_5',
+        'target_sentence': 'My name is Shubham, and I am learning English.',
+        'native_translation': 'મારું નામ શુભમ છે, અને હું અંગ્રેજી શીખી રહ્યો છું.',
+        'category': 'Introduction',
+        'difficulty': 'Easy',
+        'pronunciation_guide': 'my naym iz shoo-bhum and eye am ler-ning ing-glish',
+        'context_tip': 'Self-introduction.'
+      },
+    ];
   }
 
   /// Stop current playback

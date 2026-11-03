@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'auth_service.dart';
 
 class OverlayService {
   OverlayService._();
@@ -42,15 +43,18 @@ class OverlayService {
     required String petColorHex,
     required String sourceLang,
     required String targetLang,
+    String? authToken,
   }) async {
     if (!Platform.isAndroid) return false;
     try {
+      final token = authToken ?? AuthService.instance.currentAccessToken;
       final res = await _channel.invokeMethod<bool>('startOverlay', {
         'petKey': petKey,
         'petName': petName,
         'petColor': petColorHex,
         'sourceLang': sourceLang,
         'targetLang': targetLang,
+        'authToken': ?token,
       });
       return res ?? false;
     } catch (e) {
@@ -114,6 +118,18 @@ class OverlayService {
       });
     } catch (e) {
       debugPrint('Error updating languages in overlay: $e');
+    }
+  }
+
+  /// Update authentication token in running native overlay
+  Future<void> updateAuthToken(String token) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod('updateAuthToken', {
+        'authToken': token,
+      });
+    } catch (e) {
+      debugPrint('Error updating auth token in overlay: $e');
     }
   }
 }

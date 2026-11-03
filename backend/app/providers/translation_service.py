@@ -145,7 +145,38 @@ class TranslationService:
                 notes="Matched conversational phrase"
             )
 
-        # 3. Attempt upstream Gnani / Vachana NLP translation endpoint if accessible
+        # 3. Attempt Groq AI Translation (Fast, multilingual, high accuracy)
+        if settings.is_groq_configured():
+            try:
+                from app.ai.providers.groq_provider import GroqProvider
+                groq = GroqProvider()
+                groq_prompt = f"""You are a professional multilingual translator.
+Translate the following text accurately from {req.source_language} to {req.target_language}.
+Preserve names, numbers, and cultural context.
+Respond with ONLY the raw translated text, with no explanations, no quotes, and no extra commentary.
+
+Text to translate:
+{clean_text}"""
+                res = await groq.chat_completion(
+                    messages=[{"role": "user", "content": groq_prompt}],
+                    model=settings.GROQ_MODEL,
+                    temperature=0.1,
+                    max_tokens=256
+                )
+                trans_text = res.strip().strip('"\'')
+                if trans_text and (src_code == tgt_code or trans_text.lower() != clean_text.lower()):
+                    return TranslationResponseData(
+                        original_text=clean_text,
+                        translated_text=trans_text,
+                        source_language=req.source_language,
+                        target_language=req.target_language,
+                        provider="groq_ai_translator",
+                        notes="Accurate translation via Groq GPT-OSS 120B"
+                    )
+            except Exception:
+                pass
+
+        # 4. Attempt upstream Gnani / Vachana NLP translation endpoint if accessible
         if settings.is_gnani_configured():
             try:
                 upstream_res = await self._call_upstream_translation(clean_text, req.source_language, req.target_language)

@@ -171,56 +171,64 @@ class _MainCompanionScreenState extends ConsumerState<MainCompanionScreen> {
                   child: ListView(
                     padding: const EdgeInsets.only(left: 20, right: 20, bottom: 90),
                     children: [
-                      // Daily Practice Goal Card
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(color: AppColors.borderSoft, width: 1.0),
-                          boxShadow: const [
-                            BoxShadow(color: Color(0x08000000), blurRadius: 10, offset: Offset(0, 3)),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                const Text(
-                                  'Daily Speech Practice',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.textDark,
+                      // Daily Practice Goal Card (Interactive -> Launches Daily Practice)
+                      InkWell(
+                        onTap: () {
+                          Navigator.pushNamed(context, '/daily-practice').then((_) {
+                            _loadRealUserData();
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(18),
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(color: AppColors.borderSoft, width: 1.0),
+                            boxShadow: const [
+                              BoxShadow(color: Color(0x08000000), blurRadius: 10, offset: Offset(0, 3)),
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text(
+                                    'Daily Speech Practice',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.textDark,
+                                    ),
                                   ),
-                                ),
-                                Text(
-                                  '${_todayMinutes.toStringAsFixed(1)} / $_dailyGoalMinutes min',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: companionState.activePet.accentColor,
+                                  Text(
+                                    '${_todayMinutes.toStringAsFixed(1)} / $_dailyGoalMinutes min',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: companionState.activePet.accentColor,
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(999),
-                              child: LinearProgressIndicator(
-                                value: _dailyGoalMinutes > 0
-                                    ? (_todayMinutes / _dailyGoalMinutes).clamp(0.0, 1.0)
-                                    : 0.0,
-                                minHeight: 8,
-                                backgroundColor: AppColors.border,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  companionState.activePet.accentColor,
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(999),
+                                child: LinearProgressIndicator(
+                                  value: _dailyGoalMinutes > 0
+                                      ? (_todayMinutes / _dailyGoalMinutes).clamp(0.0, 1.0)
+                                      : 0.0,
+                                  minHeight: 8,
+                                  backgroundColor: AppColors.border,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    companionState.activePet.accentColor,
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
 

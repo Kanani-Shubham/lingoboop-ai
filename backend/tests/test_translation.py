@@ -103,4 +103,4 @@ async def test_translation_fallback():
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert "you" in data["data"]["translated_text"]
+        assert "you" in data["data"]["translated_text"].lower()

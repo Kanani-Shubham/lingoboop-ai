@@ -76,3 +76,29 @@ class ExerciseResponse(BaseModel):
     topic: str
     exercises: List[ExerciseItem]
 
+
+class DailyPracticeItem(BaseModel):
+    id: str
+    target_sentence: str
+    native_translation: str
+    category: str
+    difficulty: str
+    pronunciation_guide: Optional[str] = None
+    context_tip: Optional[str] = None
+
+
+class DailyPracticeRequest(BaseModel):
+    native_language: str = Field(default="gu-IN")
+    target_language: str = Field(default="en-US")
+    proficiency_level: Literal["beginner", "intermediate", "advanced"] = Field(default="beginner")
+    count: int = Field(default=20, ge=5, le=30)
+    category: Optional[str] = None
+
+
+class DailyPracticeResponse(BaseModel):
+    date: str
+    native_language: str
+    target_language: str
+    proficiency_level: str
+    sentences: List[DailyPracticeItem]
+
