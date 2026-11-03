@@ -232,6 +232,8 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                 domStorageEnabled = true
                 allowFileAccess = true
                 allowContentAccess = true
+                allowFileAccessFromFileURLs = true
+                allowUniversalAccessFromFileURLs = true
                 cacheMode = WebSettings.LOAD_DEFAULT
             }
             webViewClient = object : WebViewClient() {
