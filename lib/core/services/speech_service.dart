@@ -38,9 +38,9 @@ class SpeechService {
   String _activeLanguageCode = 'gu-IN';
 
   // Configurable thresholds for intelligent Gujarati VAD & trailing buffer management
-  double silenceThresholdDbfs = -42.0;
-  Duration trailingSilenceDuration = const Duration(milliseconds: 1400);
-  Duration postSilenceFlushDuration = const Duration(milliseconds: 250);
+  double silenceThresholdDbfs = -46.0;
+  Duration trailingSilenceDuration = const Duration(milliseconds: 1800);
+  Duration postSilenceFlushDuration = const Duration(milliseconds: 400);
   Duration maxRecordingDuration = const Duration(seconds: 35);
 
   /// Unified stream of real-time speech events (ready, listening, rms, processing, transcribing, final, error)
@@ -169,7 +169,7 @@ class SpeechService {
     if (!_isRecording) return null;
 
     // Brief trailing audio buffer flush before stopping hardware recorder
-    await Future.delayed(const Duration(milliseconds: 200));
+    await Future.delayed(const Duration(milliseconds: 350));
     final path = await stopRecording();
 
     _unifiedSpeechEventsController.add({'event': 'processing'});

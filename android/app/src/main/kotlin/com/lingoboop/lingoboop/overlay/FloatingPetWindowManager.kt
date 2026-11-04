@@ -1593,7 +1593,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                 var speechDetected = false
                 var lastSpeechTime = System.currentTimeMillis()
                 val startTime = System.currentTimeMillis()
-                val silenceTimeoutMs = 1400L // 1.4s trailing silence allows natural pauses without premature cutoff
+                val silenceTimeoutMs = 1800L // 1.8s trailing silence allows natural inter-clause pauses without premature cutoff
                 val maxDurationMs = 30000L
 
                 while (isRecordingAudio) {
@@ -1610,7 +1610,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                         val dbfs = if (rms > 0) 20.0 * kotlin.math.log10(rms / 32768.0) else -999.0
 
                         val now = System.currentTimeMillis()
-                        if (dbfs > -40.0) {
+                        if (dbfs > -46.0) {
                             speechDetected = true
                             lastSpeechTime = now
                         } else if (speechDetected && (now - lastSpeechTime > silenceTimeoutMs)) {
@@ -1625,9 +1625,9 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                     }
                 }
 
-                // Flush trailing 200ms audio buffer to capture complete word endings
+                // Flush trailing 400ms audio buffer to capture complete word endings
                 try {
-                    val flushBuffer = ShortArray(1600)
+                    val flushBuffer = ShortArray(6400)
                     val readFlush = record.read(flushBuffer, 0, flushBuffer.size)
                     if (readFlush > 0) {
                         for (i in 0 until readFlush) {
@@ -1785,7 +1785,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                 var speechDetected = false
                 var lastSpeechTime = System.currentTimeMillis()
                 val startTime = System.currentTimeMillis()
-                val silenceTimeoutMs = 1400L
+                val silenceTimeoutMs = 1800L
                 val maxDurationMs = 25000L
 
                 while (isRecordingAudio) {
@@ -1802,7 +1802,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                         val dbfs = if (rms > 0) 20.0 * kotlin.math.log10(rms / 32768.0) else -999.0
 
                         val now = System.currentTimeMillis()
-                        if (dbfs > -40.0) {
+                        if (dbfs > -46.0) {
                             speechDetected = true
                             lastSpeechTime = now
                         } else if (speechDetected && (now - lastSpeechTime > silenceTimeoutMs)) {
@@ -1817,7 +1817,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                 }
 
                 try {
-                    val flushBuffer = ShortArray(1600)
+                    val flushBuffer = ShortArray(6400)
                     val readFlush = record.read(flushBuffer, 0, flushBuffer.size)
                     if (readFlush > 0) {
                         for (i in 0 until readFlush) {
