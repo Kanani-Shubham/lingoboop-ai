@@ -21,7 +21,5 @@ class STTResponseData(BaseModel):
     confidence: Optional[float] = None
     words: Optional[List[WordConfidence]] = None
     duration_seconds: Optional[float] = None
-    truncated: Optional[bool] = None
-    recording_id: Optional[str] = None
     raw_response: Optional[dict] = None
 
