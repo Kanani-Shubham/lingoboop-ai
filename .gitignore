@@ -83,3 +83,4 @@ npm-debug.log*
 live_*.png
 current_device_screen.png
 i_need_img'/
+*.wav

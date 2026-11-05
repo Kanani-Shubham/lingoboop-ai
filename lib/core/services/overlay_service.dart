@@ -111,12 +111,16 @@ class OverlayService {
   Future<void> updateLanguages({
     required String sourceLang,
     required String targetLang,
+    String? sourceLangName,
+    String? targetLangName,
   }) async {
     if (!Platform.isAndroid) return;
     try {
       await _channel.invokeMethod('updateLanguages', {
         'sourceLang': sourceLang,
         'targetLang': targetLang,
+        'sourceLangName': sourceLangName,
+        'targetLangName': targetLangName,
       });
     } catch (e) {
       debugPrint('Error updating languages in overlay: $e');
@@ -159,6 +163,18 @@ class OverlayService {
     }
   }
 
+  /// Fetch latest authoritative card state from native SharedPreferences (e.g. after returning from background)
+  Future<Map<String, dynamic>?> getLatestCardState() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final res = await _channel.invokeMapMethod<String, dynamic>('getLatestCardState');
+      return res;
+    } catch (e) {
+      debugPrint('Error getting latest card state from native overlay: $e');
+      return null;
+    }
+  }
+
   /// Synchronize authoritative PolyCard state with running native overlay
   Future<void> updateCardState({
     required String petId,
@@ -167,6 +183,8 @@ class OverlayService {
     required String voiceId,
     required String sourceLanguage,
     required String targetLanguage,
+    String? sourceLanguageName,
+    String? targetLanguageName,
     required String originalText,
     required String translatedText,
     String? correction,
@@ -184,6 +202,8 @@ class OverlayService {
         'voiceId': voiceId,
         'sourceLanguage': sourceLanguage,
         'targetLanguage': targetLanguage,
+        'sourceLanguageName': sourceLanguageName,
+        'targetLanguageName': targetLanguageName,
         'originalText': originalText,
         'translatedText': translatedText,
         'correction': correction,

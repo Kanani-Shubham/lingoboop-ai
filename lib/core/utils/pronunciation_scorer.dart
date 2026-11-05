@@ -44,7 +44,7 @@ class PronunciationResult {
 class PronunciationScorer {
   PronunciationScorer._();
 
-  static final RegExp _punctRegex = RegExp(r'[.,\/#!$%\^&\*;:{}=\-_`~()?"।॥]');
+  static final RegExp _punctRegex = RegExp(r'[.,\/#!$%\^&\*;:{}=\-_`~()?"।॥¿¡]');
   static final RegExp _multiSpaceRegex = RegExp(r'\s+');
 
   /// Clean, lowercase, and tokenize a sentence into individual words

@@ -9,6 +9,16 @@ class UserDataService {
 
   final _storage = const FlutterSecureStorage();
   String _cachedVoice = 'Shivani';
+  String? _cachedCharacter;
+  String? _cachedSourceLang;
+  String? _cachedTargetLang;
+
+  // Active conversation session state for reusing sessions within 30 min
+  String? _activeConversationId;
+  String? _activeConversationCharId;
+  String? _activeConversationSrcLang;
+  String? _activeConversationTgtLang;
+  DateTime? _lastConversationTime;
 
   Future<String> getSelectedVoice() async {
     try {
@@ -25,6 +35,51 @@ class UserDataService {
     _cachedVoice = voice;
     try {
       await _storage.write(key: 'selected_tts_voice', value: voice);
+    } catch (_) {}
+    savePreferences(selectedVoiceId: voice);
+  }
+
+  Future<String?> getCachedCharacter() async {
+    if (_cachedCharacter != null) return _cachedCharacter;
+    try {
+      final c = await _storage.read(key: 'active_character_id');
+      if (c != null && c.isNotEmpty) {
+        _cachedCharacter = c;
+        return c;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> saveCachedCharacter(String charId) async {
+    _cachedCharacter = charId;
+    try {
+      await _storage.write(key: 'active_character_id', value: charId);
+    } catch (_) {}
+  }
+
+  Future<Map<String, String>?> getCachedLanguages() async {
+    if (_cachedSourceLang != null && _cachedTargetLang != null) {
+      return {'source': _cachedSourceLang!, 'target': _cachedTargetLang!};
+    }
+    try {
+      final src = await _storage.read(key: 'source_language_code');
+      final tgt = await _storage.read(key: 'target_language_code');
+      if (src != null && tgt != null) {
+        _cachedSourceLang = src;
+        _cachedTargetLang = tgt;
+        return {'source': src, 'target': tgt};
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> saveCachedLanguages({required String sourceCode, required String targetCode}) async {
+    _cachedSourceLang = sourceCode;
+    _cachedTargetLang = targetCode;
+    try {
+      await _storage.write(key: 'source_language_code', value: sourceCode);
+      await _storage.write(key: 'target_language_code', value: targetCode);
     } catch (_) {}
   }
 
@@ -101,12 +156,25 @@ class UserDataService {
   /// Upsert user preferences
   Future<bool> savePreferences({
     String? activeCharacterId,
+    String? selectedVoiceId,
+    String? selectedVoiceProvider,
+    String? selectedVoiceLanguage,
     double? audioSpeed,
     int? dailyGoalMinutes,
     bool? overlayEnabled,
     double? overlayPositionX,
     double? overlayPositionY,
   }) async {
+    if (activeCharacterId != null) {
+      saveCachedCharacter(activeCharacterId);
+    }
+    if (selectedVoiceId != null) {
+      _cachedVoice = selectedVoiceId;
+      try {
+        await _storage.write(key: 'selected_tts_voice', value: selectedVoiceId);
+      } catch (_) {}
+    }
+
     final uid = currentUserId;
     final client = _client;
     if (client == null || uid == null) return false;
@@ -117,6 +185,9 @@ class UserDataService {
         'updated_at': DateTime.now().toIso8601String(),
       };
       if (activeCharacterId != null) payload['active_character_id'] = activeCharacterId;
+      if (selectedVoiceId != null) payload['selected_voice_id'] = selectedVoiceId;
+      if (selectedVoiceProvider != null) payload['selected_voice_provider'] = selectedVoiceProvider;
+      if (selectedVoiceLanguage != null) payload['selected_voice_language'] = selectedVoiceLanguage;
       if (audioSpeed != null) payload['audio_speed'] = audioSpeed;
       if (dailyGoalMinutes != null) payload['daily_goal_minutes'] = dailyGoalMinutes;
       if (overlayEnabled != null) payload['overlay_enabled'] = overlayEnabled;
@@ -156,6 +227,8 @@ class UserDataService {
     required String targetCode,
     String proficiencyLevel = 'beginner',
   }) async {
+    saveCachedLanguages(sourceCode: nativeCode, targetCode: targetCode);
+
     final uid = currentUserId;
     final client = _client;
     if (client == null || uid == null) return false;
@@ -177,7 +250,7 @@ class UserDataService {
   }
 
   /// Fetch conversation history
-  Future<List<Map<String, dynamic>>> getConversations() async {
+  Future<List<Map<String, dynamic>>> getConversations({int limit = 50, int offset = 0}) async {
     final uid = currentUserId;
     final client = _client;
     if (client == null || uid == null) return [];
@@ -188,7 +261,7 @@ class UserDataService {
           .select('*, messages(*)')
           .eq('user_id', uid)
           .order('updated_at', ascending: false)
-          .limit(50);
+          .range(offset, offset + limit - 1);
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
       debugPrint('Error fetching conversations: $e');
@@ -210,22 +283,45 @@ class UserDataService {
     if (client == null || uid == null) return null;
 
     try {
-      // 1. Create conversation record
-      final conv = await client
-          .from('conversations')
-          .insert({
-            'user_id': uid,
-            'character_id': characterId,
-            'title': sourceText.length > 28 ? '${sourceText.substring(0, 28)}...' : sourceText,
-            'source_language': sourceLanguage,
-            'target_language': targetLanguage,
-          })
-          .select('id')
-          .single();
+      final now = DateTime.now();
+      String convId;
 
-      final convId = conv['id'] as String;
+      final canReuse = _activeConversationId != null &&
+          _activeConversationCharId == characterId &&
+          _activeConversationSrcLang == sourceLanguage &&
+          _activeConversationTgtLang == targetLanguage &&
+          _lastConversationTime != null &&
+          now.difference(_lastConversationTime!).inMinutes < 30;
 
-      // 2. Insert message record (composite key ensures user_id matches conversation.user_id)
+      if (canReuse) {
+        convId = _activeConversationId!;
+        await client.from('conversations').update({
+          'updated_at': now.toIso8601String(),
+        }).eq('id', convId);
+      } else {
+        final conv = await client
+            .from('conversations')
+            .insert({
+              'user_id': uid,
+              'character_id': characterId,
+              'title': sourceText.length > 28 ? '${sourceText.substring(0, 28)}...' : sourceText,
+              'source_language': sourceLanguage,
+              'target_language': targetLanguage,
+              'created_at': now.toIso8601String(),
+              'updated_at': now.toIso8601String(),
+            })
+            .select('id')
+            .single();
+
+        convId = conv['id'] as String;
+        _activeConversationId = convId;
+        _activeConversationCharId = characterId;
+        _activeConversationSrcLang = sourceLanguage;
+        _activeConversationTgtLang = targetLanguage;
+      }
+      _lastConversationTime = now;
+
+      // 2. Insert message record
       await client.from('messages').insert({
         'conversation_id': convId,
         'user_id': uid,
@@ -233,6 +329,7 @@ class UserDataService {
         'source_text': sourceText,
         'translated_text': translatedText,
         'pronunciation_score': pronunciationScore,
+        'created_at': now.toIso8601String(),
       });
 
       // 3. Insert companion response message
@@ -243,6 +340,7 @@ class UserDataService {
           'sender_role': 'assistant',
           'source_text': sourceText,
           'translated_text': translatedText,
+          'created_at': now.add(const Duration(milliseconds: 50)).toIso8601String(),
         });
       }
 

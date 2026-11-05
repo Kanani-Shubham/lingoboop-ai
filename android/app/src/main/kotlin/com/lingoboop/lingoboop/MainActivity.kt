@@ -1,5 +1,6 @@
 package com.lingoboop.lingoboop
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -7,14 +8,13 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
+import com.lingoboop.lingoboop.audio.VoiceActivityRecorder
 import com.lingoboop.lingoboop.overlay.FloatingPetService
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 class MainActivity : FlutterActivity() {
 
@@ -23,7 +23,6 @@ class MainActivity : FlutterActivity() {
     private val SPEECH_CHANNEL = "com.lingoboop.app/speech"
     private val SPEECH_EVENT_CHANNEL = "com.lingoboop.app/speech_events"
 
-    private var speechRecognizer: SpeechRecognizer? = null
     private var speechEventSink: EventChannel.EventSink? = null
 
     companion object {
@@ -84,7 +83,7 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "isAvailable" -> {
-                    result.success(SpeechRecognizer.isRecognitionAvailable(this))
+                    result.success(true)
                 }
                 else -> result.notImplemented()
             }
@@ -177,11 +176,19 @@ class MainActivity : FlutterActivity() {
                 "updateLanguages" -> {
                     val sourceLang = call.argument<String>("sourceLang") ?: "gu-IN"
                     val targetLang = call.argument<String>("targetLang") ?: "en-US"
+                    val sourceLangName = call.argument<String>("sourceLangName")
+                    val targetLangName = call.argument<String>("targetLangName")
 
                     val intent = Intent(this, FloatingPetService::class.java).apply {
                         action = FloatingPetService.ACTION_UPDATE_LANGUAGES
                         putExtra(FloatingPetService.EXTRA_SOURCE_LANG, sourceLang)
                         putExtra(FloatingPetService.EXTRA_TARGET_LANG, targetLang)
+                        if (sourceLangName != null) {
+                            putExtra("extra_source_lang_name", sourceLangName)
+                        }
+                        if (targetLangName != null) {
+                            putExtra("extra_target_lang_name", targetLangName)
+                        }
                     }
                     startService(intent)
                     result.success(true)
@@ -215,6 +222,22 @@ class MainActivity : FlutterActivity() {
                     startService(intent)
                     result.success(true)
                 }
+                "getLatestCardState" -> {
+                    val prefs = getSharedPreferences("lingoboop_overlay_prefs", Context.MODE_PRIVATE)
+                    val map = mapOf(
+                        "petId" to prefs.getString("pet_key", "fox"),
+                        "petName" to prefs.getString("pet_name", "Maru"),
+                        "petColorHex" to prefs.getString("pet_color", "#c4571c"),
+                        "voiceId" to prefs.getString("selected_tts_voice", "Shivani"),
+                        "sourceLanguage" to prefs.getString("source_lang", "gu-IN"),
+                        "targetLanguage" to prefs.getString("target_lang", "en-US"),
+                        "originalText" to prefs.getString("saved_spoken_text", ""),
+                        "translatedText" to prefs.getString("saved_translated_text", ""),
+                        "correction" to prefs.getString("saved_correction", null),
+                        "statusNote" to prefs.getString("saved_status_note", null)
+                    )
+                    result.success(map)
+                }
                 "updateCardState" -> {
                     val petId = call.argument<String>("petId") ?: "fox"
                     val petName = call.argument<String>("petName") ?: "Maru"
@@ -222,6 +245,8 @@ class MainActivity : FlutterActivity() {
                     val voiceId = call.argument<String>("voiceId") ?: "Shivani"
                     val sourceLang = call.argument<String>("sourceLanguage") ?: "gu-IN"
                     val targetLang = call.argument<String>("targetLanguage") ?: "en-US"
+                    val sourceLangName = call.argument<String>("sourceLanguageName") ?: ""
+                    val targetLangName = call.argument<String>("targetLanguageName") ?: ""
                     val originalText = call.argument<String>("originalText") ?: ""
                     val translatedText = call.argument<String>("translatedText") ?: ""
                     val correction = call.argument<String>("correction")
@@ -238,6 +263,8 @@ class MainActivity : FlutterActivity() {
                         putExtra("voice_id", voiceId)
                         putExtra("source_language", sourceLang)
                         putExtra("target_language", targetLang)
+                        putExtra("source_language_name", sourceLangName)
+                        putExtra("target_language_name", targetLangName)
                         putExtra("original_text", originalText)
                         putExtra("translated_text", translatedText)
                         if (correction != null) putExtra("correction", correction)
@@ -309,80 +336,73 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun startSpeechListening(language: String) {
-        Handler(Looper.getMainLooper()).post {
-            try {
-                speechRecognizer?.destroy()
-                val recognizer = SpeechRecognizer.createSpeechRecognizer(this)
-                speechRecognizer = recognizer
-
-                recognizer.setRecognitionListener(object : RecognitionListener {
-                    override fun onReadyForSpeech(params: Bundle?) {
-                        speechEventSink?.success(mapOf("event" to "ready"))
-                    }
-
-                    override fun onBeginningOfSpeech() {
-                        speechEventSink?.success(mapOf("event" to "speech_started"))
-                    }
-
-                    override fun onRmsChanged(rmsdB: Float) {
-                        speechEventSink?.success(mapOf("event" to "rms", "rms" to rmsdB))
-                    }
-
-                    override fun onBufferReceived(buffer: ByteArray?) {}
-
-                    override fun onEndOfSpeech() {
-                        speechEventSink?.success(mapOf("event" to "end_of_speech"))
-                    }
-
-                    override fun onError(error: Int) {
-                        speechEventSink?.success(mapOf("event" to "error", "error" to error))
-                    }
-
-                    override fun onResults(results: Bundle?) {
-                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        val text = if (!matches.isNullOrEmpty()) matches[0] else ""
-                        speechEventSink?.success(mapOf("event" to "final", "text" to text))
-                    }
-
-                    override fun onPartialResults(partialResults: Bundle?) {
-                        val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        val text = if (!matches.isNullOrEmpty()) matches[0] else ""
-                        if (text.isNotEmpty()) {
-                            speechEventSink?.success(mapOf("event" to "partial", "text" to text))
-                        }
-                    }
-
-                    override fun onEvent(eventType: Int, params: Bundle?) {}
-                })
-
-                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
-                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-                }
-                recognizer.startListening(intent)
-            } catch (e: Exception) {
-                speechEventSink?.success(mapOf("event" to "error", "message" to (e.message ?: "Failed to start speech recognizer")))
+        val recorder = VoiceActivityRecorder.getInstance(this)
+        recorder.startRecording(object : VoiceActivityRecorder.VadListener {
+            override fun onRecordingStarted(startTimeMs: Long) {
+                speechEventSink?.success(mapOf("event" to "listening", "language" to language))
             }
-        }
+
+            override fun onFirstSpeechDetected(timeMs: Long, dbfs: Double, rms: Double) {
+                speechEventSink?.success(
+                    mapOf(
+                        "event" to "speech_detected",
+                        "time" to timeMs,
+                        "dbfs" to dbfs,
+                        "rms" to rms
+                    )
+                )
+            }
+
+            override fun onSpeechActive(timeMs: Long, dbfs: Double, rms: Double) {
+                speechEventSink?.success(mapOf("event" to "rms", "rms" to dbfs))
+            }
+
+            override fun onSilenceThresholdReached(timeMs: Long, silenceDurationMs: Long) {
+                speechEventSink?.success(
+                    mapOf(
+                        "event" to "silence_detected",
+                        "silence_duration" to silenceDurationMs
+                    )
+                )
+            }
+
+            override fun onRecordingStopped(
+                wavFile: File?,
+                rawPcm: ByteArray,
+                speechDetected: Boolean,
+                durationSec: Double
+            ) {
+                if (wavFile != null && speechDetected && wavFile.exists()) {
+                    speechEventSink?.success(
+                        mapOf(
+                            "event" to "recording_complete",
+                            "path" to wavFile.absolutePath,
+                            "speech_detected" to true,
+                            "duration" to durationSec
+                        )
+                    )
+                } else {
+                    speechEventSink?.success(
+                        mapOf(
+                            "event" to "no_speech",
+                            "speech_detected" to false,
+                            "duration" to durationSec
+                        )
+                    )
+                }
+            }
+
+            override fun onError(message: String) {
+                speechEventSink?.success(mapOf("event" to "error", "message" to message))
+            }
+        })
     }
 
     private fun stopSpeechListening() {
-        Handler(Looper.getMainLooper()).post {
-            try {
-                speechRecognizer?.stopListening()
-            } catch (_: Exception) {}
-        }
+        VoiceActivityRecorder.getInstance(this).stopRecordingManually()
     }
 
     private fun cancelSpeechListening() {
-        Handler(Looper.getMainLooper()).post {
-            try {
-                speechRecognizer?.cancel()
-                speechRecognizer?.destroy()
-                speechRecognizer = null
-            } catch (_: Exception) {}
-        }
+        VoiceActivityRecorder.getInstance(this).cancelRecording()
     }
 }

@@ -68,7 +68,7 @@ def normalize_pcm_16bit(pcm_bytes: bytes, target_peak_dbfs: float = -1.0, target
             limited = threshold + compressed_over
             out_val = math.copysign(limited, val)
 
-        int_val = int(round(out_val))
+        int_val = round(out_val)
         if int_val > 32767:
             int_val = 32767
         elif int_val < -32768:
@@ -176,12 +176,19 @@ class GnaniTTSProvider(BaseTTSProvider):
 
         headers = self._get_headers()
 
+        # Gnani Timbre strictly enforces an allowed speed range between 0.85 and 1.15.
+        # If client passes 0.75 for slow playback, clamp to 1.0 for synthesis so the client
+        # can adjust the playback rate on the audio player without losing voice identity.
+        gnani_speed = request.speed
+        if gnani_speed < 0.85 or gnani_speed > 1.15:
+            gnani_speed = 1.0
+
         payload = {
             "text": request.text,
             "voice": request.voice,
             "model": target_model,
             "language": request.language,
-            "speed": request.speed,
+            "speed": gnani_speed,
             "audio_config": request.audio_config.model_dump() if request.audio_config else {
                 "sample_rate": 16000,
                 "num_channels": 1,

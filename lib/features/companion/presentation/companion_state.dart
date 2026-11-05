@@ -130,37 +130,195 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     SpeechService.instance.resolveBackendUrl().then((url) {
       OverlayService.instance.updateBackendUrl(url);
     });
-    UserDataService.instance.getSelectedVoice().then((voice) {
+    _loadInitialUserData();
+  }
+
+  Future<void> _loadInitialUserData() async {
+    // 1. Instant local cache restore
+    final cachedChar = await UserDataService.instance.getCachedCharacter();
+    final cachedVoice = await UserDataService.instance.getSelectedVoice();
+    final cachedLangs = await UserDataService.instance.getCachedLanguages();
+    if (!mounted) return;
+
+    CharacterModel initialPet = state.activePet;
+    if (cachedChar != null && cachedChar.isNotEmpty) {
+      initialPet = CharacterRegistry.getByKey(cachedChar);
+    }
+
+    LanguageItem initialSrc = state.sourceLanguage;
+    LanguageItem initialTgt = state.targetLanguage;
+    if (cachedLangs != null) {
+      if (cachedLangs['source'] != null) {
+        initialSrc = LanguageRegistry.getByCode(cachedLangs['source']!);
+      }
+      if (cachedLangs['target'] != null) {
+        initialTgt = LanguageRegistry.getByCode(cachedLangs['target']!);
+      }
+    }
+
+    if (mounted) {
+      state = state.copyWith(
+        activePet: initialPet,
+        selectedVoice: cachedVoice,
+        sourceLanguage: initialSrc,
+        targetLanguage: initialTgt,
+      );
+      final pet = state.activePet;
+      final colorHex = '#${pet.accentColor.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+      OverlayService.instance.updatePet(
+        petKey: pet.key,
+        petName: pet.name,
+        petColorHex: colorHex,
+      );
+      OverlayService.instance.updateLanguages(
+        sourceLang: initialSrc.bcp47,
+        targetLang: initialTgt.bcp47,
+        sourceLangName: initialSrc.name,
+        targetLangName: initialTgt.name,
+      );
+      OverlayService.instance.updateVoice(cachedVoice);
+      _syncOverlayCard();
+    }
+
+    // 2. Network refresh from Supabase
+    if (!mounted) return;
+    try {
+      final prefs = await UserDataService.instance.getPreferences();
+      String voice = cachedVoice;
+      if (prefs != null) {
+        final remoteChar = prefs['active_character_id'] as String?;
+        final remoteVoice = prefs['selected_voice_id'] as String?;
+        if (remoteChar != null && remoteChar.isNotEmpty) {
+          initialPet = CharacterRegistry.getByKey(remoteChar);
+        }
+        if (remoteVoice != null && remoteVoice.isNotEmpty) {
+          voice = remoteVoice;
+        }
+      }
+
+      final langs = await UserDataService.instance.getUserLanguages();
+      if (langs.isNotEmpty) {
+        final active = langs.firstWhere((l) => l['is_active'] == true, orElse: () => langs.first);
+        final srcCode = active['native_language_code'] as String?;
+        final tgtCode = active['target_language_code'] as String?;
+        if (srcCode != null) initialSrc = LanguageRegistry.getByCode(srcCode);
+        if (tgtCode != null) initialTgt = LanguageRegistry.getByCode(tgtCode);
+      }
+
       if (mounted) {
-        state = state.copyWith(selectedVoice: voice);
+        state = state.copyWith(
+          activePet: initialPet,
+          selectedVoice: voice,
+          sourceLanguage: initialSrc,
+          targetLanguage: initialTgt,
+        );
+        final pet = state.activePet;
+        final colorHex = '#${pet.accentColor.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+        OverlayService.instance.updatePet(
+          petKey: pet.key,
+          petName: pet.name,
+          petColorHex: colorHex,
+        );
+        OverlayService.instance.updateLanguages(
+          sourceLang: initialSrc.bcp47,
+          targetLang: initialTgt.bcp47,
+          sourceLangName: initialSrc.name,
+          targetLangName: initialTgt.name,
+        );
         OverlayService.instance.updateVoice(voice);
         _syncOverlayCard();
       }
-    });
+    } catch (_) {}
   }
 
   Timer? _karaokeTimer;
+
   Timer? _previewDebounceTimer;
+
   StreamSubscription? _liveSpeechSub;
+
   int _translationToken = 0;
 
+  String _repeatHeardText = '';
+
+
+
   void _syncOverlayCard([double? score]) {
+
     final pet = state.activePet;
+
     final colorHex = '#${pet.accentColor.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+
     OverlayService.instance.updateCardState(
+
       petId: pet.key,
+
       petName: pet.name,
+
       petColorHex: colorHex,
+
       voiceId: state.selectedVoice,
+
       sourceLanguage: state.sourceLanguage.bcp47,
+
       targetLanguage: state.targetLanguage.bcp47,
+
+      sourceLanguageName: state.sourceLanguage.name,
+
+      targetLanguageName: state.targetLanguage.name,
+
       originalText: state.spokenText,
+
       translatedText: state.translatedText,
+
       correction: state.correction,
+
       statusNote: state.statusNote,
+
       words: state.words.map((w) => w.text).toList(),
+
       pronunciationScore: score,
+
     );
+
+  }
+
+
+
+  void syncCardToOverlay() {
+
+    _syncOverlayCard();
+
+  }
+
+
+
+  Future<void> syncFromNativeOverlay() async {
+
+    final nativeState = await OverlayService.instance.getLatestCardState();
+
+    if (nativeState == null) return;
+
+    final nativeSpoken = nativeState['originalText'] as String?;
+
+    final nativeTrans = nativeState['translatedText'] as String?;
+
+    final nativeCorr = nativeState['correction'] as String?;
+
+    if (nativeTrans != null && nativeTrans.isNotEmpty && nativeTrans != state.translatedText) {
+
+      updateFromExternalOverlay(
+
+        spoken: nativeSpoken ?? '',
+
+        translated: nativeTrans,
+
+        correction: nativeCorr,
+
+      );
+
+    }
+
   }
 
   void setTtsVoice(String voice) {
@@ -196,6 +354,8 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     OverlayService.instance.updateLanguages(
       sourceLang: lang.bcp47,
       targetLang: state.targetLanguage.bcp47,
+      sourceLangName: lang.name,
+      targetLangName: state.targetLanguage.name,
     );
     _syncOverlayCard();
   }
@@ -210,6 +370,8 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     OverlayService.instance.updateLanguages(
       sourceLang: state.sourceLanguage.bcp47,
       targetLang: lang.bcp47,
+      sourceLangName: state.sourceLanguage.name,
+      targetLangName: lang.name,
     );
     _syncOverlayCard();
   }
@@ -279,20 +441,27 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     _karaokeTimer?.cancel();
     _previewDebounceTimer?.cancel();
     _liveSpeechSub?.cancel();
-    await SpeechService.instance.stopPlayback();
 
     state = state.copyWith(
       isListening: true,
       isRepeatPracticing: false,
       isEditingTranscript: false,
       petMode: 'listen',
-      statusNote: 'Listening… speak in ${state.sourceLanguage.name}',
+      statusNote: 'Listening... speak in ${state.sourceLanguage.name}',
       spokenText: '',
     );
 
+    final srcLangCode = state.sourceLanguage.bcp47;
+    await SpeechService.instance.stopPlayback();
+    if (!mounted) return;
     _liveSpeechSub = SpeechService.instance.liveSpeechEvents.listen((event) {
+      if (!mounted) return;
       final ev = event['event'] as String?;
-      if (ev == 'processing') {
+      if (ev == 'speech_detected') {
+        state = state.copyWith(statusNote: 'Speech detected…', petMode: 'listen');
+      } else if (ev == 'silence_detected') {
+        state = state.copyWith(statusNote: 'Silence detected. Finalizing…', petMode: 'think');
+      } else if (ev == 'processing') {
         state = state.copyWith(statusNote: 'Processing audio…', petMode: 'think');
       } else if (ev == 'transcribing') {
         state = state.copyWith(statusNote: 'Transcribing with Gnani Prisma v3.0…', petMode: 'think');
@@ -330,7 +499,9 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
       }
     });
 
-    final started = await SpeechService.instance.startLiveRecognition(state.sourceLanguage.bcp47);
+    if (!mounted) return;
+    final started = await SpeechService.instance.startLiveRecognition(srcLangCode);
+    if (!mounted) return;
     if (!started) {
       _liveSpeechSub?.cancel();
       final isPermDenied = await Permission.microphone.isPermanentlyDenied;
@@ -476,18 +647,36 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     final boundedHistory = updatedHistory.length > 8 ? updatedHistory.sublist(updatedHistory.length - 8) : updatedHistory;
 
     state = state.copyWith(
+
       translatedText: translated,
+
       aiReplyText: replyText,
+
       correction: correction,
+
       explanation: explanation,
+
       examples: examples,
+
       pronunciationGuide: pronunciationGuide,
+
       words: wordList,
+
       aiProvider: providerName,
+
       conversationHistory: boundedHistory,
+
       statusNote: 'Synthesizing voice via Gnani Timbre TTS…',
+
       petMode: 'think',
+
     );
+
+
+
+    // Immediately synchronize translation text and languages to external overlay
+
+    _syncOverlayCard();
 
     // Save to real database
     UserDataService.instance.recordConversationMessage(
@@ -546,6 +735,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
           languageCode: state.targetLanguage.bcp47,
           speed: 1.0,
         ).then((path) {
+          if (!mounted) return;
           if (path != null) {
             state = state.copyWith(lastTtsPath: path, statusNote: '');
             SpeechService.instance.playAudioFile(path, speed: rate);
@@ -592,6 +782,13 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
 
   /// Start repeat-after-me pronunciation practice with real-time feedback
   Future<void> startRepeatPractice() async {
+    if (state.words.isEmpty && state.translatedText.isNotEmpty) {
+      final rawWords = state.translatedText.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+      final wordList = rawWords
+          .map((w) => KaraokeWord(text: w, isHighlighted: false, evaluation: WordEvaluationState.none))
+          .toList();
+      state = state.copyWith(words: wordList);
+    }
     if (state.words.isEmpty) {
       state = state.copyWith(statusNote: 'Say or type something first, then repeat it.');
       return;
@@ -600,144 +797,263 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     _karaokeTimer?.cancel();
     _previewDebounceTimer?.cancel();
     _liveSpeechSub?.cancel();
-    await SpeechService.instance.stopPlayback();
 
-    // Reset highlighting to fresh state
     final resetWords = state.words
         .map((w) => w.copyWith(isHighlighted: false, evaluation: WordEvaluationState.none))
         .toList();
 
     state = state.copyWith(
       words: resetWords,
-      statusNote: 'Say the target sentence out loud now…',
+      statusNote: 'Say the target sentence out loud now...',
       isListening: true,
       isRepeatPracticing: true,
       petMode: 'listen',
     );
 
+    await SpeechService.instance.stopPlayback();
+
+    _repeatHeardText = '';
+
+    final tgtLangCode = state.targetLanguage.bcp47;
     _liveSpeechSub = SpeechService.instance.liveSpeechEvents.listen((event) {
+      if (!mounted) return;
       final ev = event['event'] as String?;
-      if (ev == 'partial') {
+
+      if (ev == 'speech_detected') {
+        state = state.copyWith(statusNote: 'Speech detected…', petMode: 'listen');
+      } else if (ev == 'silence_detected') {
+        state = state.copyWith(statusNote: 'Silence detected. Evaluating…', petMode: 'think');
+      } else if (ev == 'processing' || ev == 'transcribing') {
+        state = state.copyWith(statusNote: 'Evaluating pronunciation with Gnani Prisma…', petMode: 'think');
+      } else if (ev == 'partial') {
+
         final text = (event['text'] as String?)?.trim() ?? '';
+
         if (text.isNotEmpty && state.isRepeatPracticing) {
-          state = state.copyWith(spokenText: 'Heard: $text');
+
+          _repeatHeardText = text;
+
+          state = state.copyWith(statusNote: 'Heard: "$text"');
+
         }
+
       } else if (ev == 'final') {
+
         final text = (event['text'] as String?)?.trim() ?? '';
+
         if (text.isNotEmpty) {
+
+          _repeatHeardText = text;
+
           _evaluatePronunciation(text);
+
         } else {
+
           stopRepeatPractice();
+
         }
+
       } else if (ev == 'end_of_speech') {
-        if (state.spokenText.startsWith('Heard: ')) {
-          _evaluatePronunciation(state.spokenText.substring(7));
+
+        if (_repeatHeardText.isNotEmpty) {
+
+          _evaluatePronunciation(_repeatHeardText);
+
         }
+
       } else if (ev == 'error') {
-        if (state.spokenText.startsWith('Heard: ')) {
-          _evaluatePronunciation(state.spokenText.substring(7));
+
+        if (_repeatHeardText.isNotEmpty) {
+
+          _evaluatePronunciation(_repeatHeardText);
+
         } else {
+
           stopRepeatPractice();
+
         }
+
       }
+
     });
 
-    final started = await SpeechService.instance.startLiveRecognition(state.targetLanguage.bcp47);
+
+
+    if (!mounted) return;
+    final started = await SpeechService.instance.startLiveRecognition(tgtLangCode);
+    if (!mounted) return;
     if (!started) {
+
       _liveSpeechSub?.cancel();
+
       state = state.copyWith(
+
         isListening: false,
+
         isRepeatPracticing: false,
+
         petMode: 'oops',
+
         statusNote: 'Microphone permission needed for repeat practice.',
+
       );
+
     }
+
   }
+
+
 
   /// Stop repeat practice and evaluate honest token-level matching
+
   Future<void> stopRepeatPractice() async {
+
     if (!state.isRepeatPracticing) return;
 
+
+
     _liveSpeechSub?.cancel();
-    await SpeechService.instance.stopLiveRecognition();
+
+    final transcript = await SpeechService.instance.stopLiveRecognition();
+
+
 
     state = state.copyWith(
+
       isListening: false,
+
       isRepeatPracticing: false,
+
       petMode: 'think',
+
       statusNote: 'Analyzing pronunciation…',
+
     );
 
-    String userSpoken = state.spokenText.startsWith('Heard: ')
-        ? state.spokenText.substring(7).trim()
-        : state.spokenText.trim();
 
-    if (userSpoken.isEmpty) {
-      final transcript = await SpeechService.instance.stopLiveRecognition();
-      userSpoken = transcript ?? '';
-    } else {
-      await SpeechService.instance.cancelLiveRecognition();
-    }
+
+    final userSpoken = _repeatHeardText.isNotEmpty ? _repeatHeardText : (transcript?.trim() ?? '');
+
+    _repeatHeardText = '';
 
     _evaluatePronunciation(userSpoken);
+
   }
 
+
+
   void _evaluatePronunciation(String userSpoken) {
+
     _liveSpeechSub?.cancel();
+
     SpeechService.instance.stopLiveRecognition();
 
+
+
     final scoring = PronunciationScorer.evaluate(
+
       expectedSentence: state.translatedText,
+
       spokenTranscript: userSpoken,
+
     );
+
+
 
     if (!scoring.hasSpoken) {
+
       state = state.copyWith(
+
         statusNote: 'Could not capture clear speech. Tap mic to try again.',
+
         petMode: 'idle',
+
         isListening: false,
+
         isRepeatPracticing: false,
+
       );
+
       return;
+
     }
 
+
+
     final evaluatedWords = state.words.map((w) {
+
       final clean = PronunciationScorer.tokenize(w.text);
+
       final wordKey = clean.isNotEmpty ? clean.first : w.text.toLowerCase();
+
       final isMatched = scoring.matchedWords.contains(wordKey);
+
       return w.copyWith(
+
         isHighlighted: true,
+
         evaluation: isMatched ? WordEvaluationState.ok : WordEvaluationState.miss,
+
       );
+
     }).toList();
 
+
+
     final score = scoring.matchPercentage.toDouble();
+
     final allOk = score >= 80.0;
 
+
+
     state = state.copyWith(
+
       words: evaluatedWords,
+
       statusNote: scoring.feedbackMessage,
+
       petMode: allOk ? 'dance' : (score >= 50.0 ? 'talk' : 'oops'),
+
       isListening: false,
+
       isRepeatPracticing: false,
+
     );
+
+
 
     Future.delayed(const Duration(milliseconds: 2200), () {
+
       if (state.petMode == 'dance' || state.petMode == 'oops') {
+
         state = state.copyWith(petMode: 'idle');
+
       }
+
     });
 
+
+
     UserDataService.instance.recordConversationMessage(
+
       characterId: state.activePet.key,
+
       sourceLanguage: state.sourceLanguage.bcp47,
+
       targetLanguage: state.targetLanguage.bcp47,
+
       sourceText: state.spokenText,
+
       translatedText: state.translatedText,
+
       pronunciationScore: score,
+
     );
 
+
+
     _syncOverlayCard(score);
+
   }
 
   /// Sync external Android overlay translation events back into Flutter app state
@@ -771,24 +1087,41 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
 
   /// Sync external Android overlay pronunciation score back into Flutter app state
   void updatePronunciationFromExternal({
+
     required String heard,
+
     required double score,
+
     required String feedback,
+
   }) {
+
     state = state.copyWith(
-      spokenText: 'Heard: $heard',
+
       statusNote: feedback,
+
       petMode: score >= 80 ? 'dance' : (score >= 50 ? 'talk' : 'oops'),
+
     );
 
+
+
     UserDataService.instance.recordConversationMessage(
+
       characterId: state.activePet.key,
+
       sourceLanguage: state.sourceLanguage.bcp47,
+
       targetLanguage: state.targetLanguage.bcp47,
-      sourceText: 'Heard: $heard',
+
+      sourceText: state.spokenText,
+
       translatedText: state.translatedText,
+
       pronunciationScore: score,
+
     );
+
   }
 
   @override

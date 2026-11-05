@@ -24,7 +24,7 @@ class MainNavigationShell extends ConsumerStatefulWidget {
 }
 
 class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   int _currentIndex = 0;
   Offset _petPos = const Offset(120, 520);
   double _tx = 120.0;
@@ -50,6 +50,7 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
   void initState() {
     super.initState();
     _ticker = createTicker(_onTick)..start();
+    WidgetsBinding.instance.addObserver(this);
     _initOverlayListener();
 
     // Ground the in-app pet immediately on startup with a natural initial settling drop
@@ -109,7 +110,17 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState lifecycleState) {
+    if (lifecycleState == AppLifecycleState.paused) {
+      ref.read(companionProvider.notifier).syncCardToOverlay();
+    } else if (lifecycleState == AppLifecycleState.resumed) {
+      ref.read(companionProvider.notifier).syncFromNativeOverlay();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _ticker.dispose();
     _overlaySubscription?.cancel();
     super.dispose();

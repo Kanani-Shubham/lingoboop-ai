@@ -70,7 +70,9 @@ class FloatingPetService : Service() {
             ACTION_UPDATE_LANGUAGES -> {
                 val src = intent?.getStringExtra(EXTRA_SOURCE_LANG) ?: "gu-IN"
                 val tgt = intent?.getStringExtra(EXTRA_TARGET_LANG) ?: "en-US"
-                windowManager?.updateLanguages(src, tgt)
+                val srcName = intent?.getStringExtra("extra_source_lang_name")
+                val tgtName = intent?.getStringExtra("extra_target_lang_name")
+                windowManager?.updateLanguages(src, tgt, srcName, tgtName)
             }
             ACTION_UPDATE_AUTH_TOKEN -> {
                 val token = intent?.getStringExtra(EXTRA_AUTH_TOKEN)
@@ -91,6 +93,8 @@ class FloatingPetService : Service() {
                 val voiceId = intent?.getStringExtra("voice_id") ?: "Shivani"
                 val srcLang = intent?.getStringExtra("source_language") ?: "gu-IN"
                 val tgtLang = intent?.getStringExtra("target_language") ?: "en-US"
+                val srcLangName = intent?.getStringExtra("source_language_name")
+                val tgtLangName = intent?.getStringExtra("target_language_name")
                 val orig = intent?.getStringExtra("original_text") ?: ""
                 val trans = intent?.getStringExtra("translated_text") ?: ""
                 val corr = intent?.getStringExtra("correction")
@@ -106,6 +110,8 @@ class FloatingPetService : Service() {
                     voiceId = voiceId,
                     sourceLang = srcLang,
                     targetLang = tgtLang,
+                    sourceLangName = srcLangName,
+                    targetLangName = tgtLangName,
                     originalText = orig,
                     translatedText = trans,
                     correction = corr,
@@ -138,11 +144,18 @@ class FloatingPetService : Service() {
                 }
 
                 val notification = buildForegroundNotification()
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                     startForeground(
                         NOTIFICATION_ID,
                         notification,
-                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                    )
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        notification,
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
                     )
                 } else {
                     startForeground(NOTIFICATION_ID, notification)

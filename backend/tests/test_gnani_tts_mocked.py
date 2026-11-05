@@ -97,3 +97,32 @@ async def test_tts_voice_catalog_endpoint():
         assert v["gender"] in ["male", "female"]
         assert len(v["supported_languages"]) > 0
         assert "en-IN" in v["sample_text_by_lang"]
+
+
+@pytest.mark.asyncio
+async def test_tts_speed_clamping_for_slow_playback():
+    provider = GnaniTTSProvider(api_key="mock_key_tts")
+
+    dummy_audio_bytes = b"RIFF____WAVEfmt " + b"\x00" * 100
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.headers = {"content-type": "audio/wav"}
+    mock_resp.content = dummy_audio_bytes
+
+    # Speed 0.75 is outside Gnani Timbre 0.85-1.15 allowed window
+    req = TTSRequest(
+        text="Testing slow playback clamping",
+        voice="Shivani",
+        language="en-IN",
+        speed=0.75
+    )
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_resp
+        result = await provider.synthesize(req)
+
+        # Confirm Gnani was called with clamped speed 1.0 to avoid HTTP 400
+        call_kwargs = mock_post.call_args[1]
+        assert call_kwargs["json"]["speed"] == 1.0
+        assert result.content_type == "audio/wav"
+

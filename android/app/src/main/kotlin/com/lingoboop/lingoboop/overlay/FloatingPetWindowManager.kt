@@ -24,6 +24,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import com.lingoboop.lingoboop.audio.VoiceActivityRecorder
 import android.util.Base64
 import android.util.DisplayMetrics
 import android.util.Log
@@ -56,14 +57,48 @@ import kotlin.math.roundToInt
 
 class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnInitListener {
 
-    companion object {
-        private const val TAG = "FloatingPetOverlay"
-    }
+
 
     private val windowManager: WindowManager =
         context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    companion object {
+        private const val TAG = "FloatingPetOverlay"
+        const val PREFS_NAME = "lingoboop_overlay_prefs"
+
+        fun getCharacterColor(key: String, fallbackColorHex: String? = null): Int {
+            val canonicalKey = when (key.lowercase()) {
+                "maru" -> "fox"
+                "mimi" -> "cat"
+                "pano" -> "panda"
+                "bun" -> "bunny"
+                "pip" -> "penguin"
+                "leo" -> "lion"
+                else -> key.lowercase()
+            }
+            return when (canonicalKey) {
+                "panda" -> Color.parseColor("#2C6E5E")
+                "cat" -> Color.parseColor("#6A4CC4")
+                "bunny" -> Color.parseColor("#C23D7B")
+                "penguin" -> Color.parseColor("#2C62C4")
+                "lion" -> Color.parseColor("#9A6A06")
+                "fox" -> Color.parseColor("#C4571C")
+                else -> {
+                    if (!fallbackColorHex.isNullOrBlank()) {
+                        try {
+                            Color.parseColor(fallbackColorHex)
+                        } catch (_: Exception) {
+                            Color.parseColor("#C4571C")
+                        }
+                    } else {
+                        Color.parseColor("#C4571C")
+                    }
+                }
+            }
+        }
+    }
+
     private val prefs: SharedPreferences =
-        context.getSharedPreferences("lingoboom_overlay_prefs", Context.MODE_PRIVATE)
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     private var petView: FrameLayout? = null
     private var petWebView: WebView? = null
@@ -78,7 +113,44 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
     private var petAccentColor: Int = Color.parseColor("#c4571c")
     private var sourceLanguage: String = "gu-IN"
     private var targetLanguage: String = "en-US"
+
+    private var sourceLanguageName: String = "Gujarati"
+
+    private var targetLanguageName: String = "English"
+
     private var selectedVoice: String = "Devansh"
+
+
+
+    private fun getLanguageName(bcp47: String): String {
+
+        return when (bcp47.lowercase().split("-")[0]) {
+
+            "gu" -> "Gujarati"
+
+            "hi" -> "Hindi"
+
+            "en" -> "English"
+
+            "es" -> "Spanish"
+
+            "fr" -> "French"
+
+            "ja" -> "Japanese"
+
+            "ta" -> "Tamil"
+
+            "te" -> "Telugu"
+
+            "mr" -> "Marathi"
+
+            "bn" -> "Bengali"
+
+            else -> bcp47
+
+        }
+
+    }
     private var authToken: String? = null
     private var backendBaseUrl: String = "http://127.0.0.1:8000"
     private var savedPetXBeforePanel: Int? = null
@@ -96,9 +168,52 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
     private var isTtsReady = false
     private var speechRecognizer: SpeechRecognizer? = null
     private var activeMediaPlayer: MediaPlayer? = null
+    private var lastTtsAudioFile: File? = null
+    private var lastTtsPhrase: String? = null
     private var audioRecord: AudioRecord? = null
     @Volatile private var isRecordingAudio = false
     private var recordingThread: Thread? = null
+    private val audioExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    @Synchronized
+    private fun getOrCreateAudioRecord(): AudioRecord? {
+        val existing = audioRecord
+        if (existing != null && existing.state == AudioRecord.STATE_INITIALIZED) {
+            return existing
+        }
+        try {
+            existing?.release()
+        } catch (_: Exception) {}
+
+        val sampleRate = 16000
+        val channelConfig = AudioFormat.CHANNEL_IN_MONO
+        val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+        val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+        val bufferSize = Math.max(minBufferSize, 4096)
+
+        return try {
+            val record = AudioRecord(
+                MediaRecorder.AudioSource.MIC,
+                sampleRate,
+                channelConfig,
+                audioFormat,
+                bufferSize
+            )
+            if (record.state == AudioRecord.STATE_INITIALIZED) {
+                audioRecord = record
+                Log.i(TAG, "AudioRecord pre-warmed successfully (state=STATE_INITIALIZED, stopped)")
+                record
+            } else {
+                record.release()
+                audioRecord = null
+                null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "AudioRecord init failed: ${e.message}")
+            audioRecord = null
+            null
+        }
+    }
 
     // Autonomous wandering handler
     private val roamHandler = Handler(Looper.getMainLooper())
@@ -135,14 +250,12 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
     private fun loadSavedSettings() {
         petKey = prefs.getString("pet_key", "fox") ?: "fox"
         petName = prefs.getString("pet_name", "Maru") ?: "Maru"
-        val savedColor = prefs.getString("pet_color", "#c4571c") ?: "#c4571c"
-        try {
-            petAccentColor = Color.parseColor(savedColor)
-        } catch (_: Exception) {
-            petAccentColor = Color.parseColor("#c4571c")
-        }
+        val savedColor = prefs.getString("pet_color", null)
+        petAccentColor = getCharacterColor(petKey, savedColor)
         sourceLanguage = prefs.getString("source_lang", "gu-IN") ?: "gu-IN"
         targetLanguage = prefs.getString("target_lang", "en-US") ?: "en-US"
+        sourceLanguageName = prefs.getString("source_lang_name", getLanguageName(sourceLanguage)) ?: getLanguageName(sourceLanguage)
+        targetLanguageName = prefs.getString("target_lang_name", getLanguageName(targetLanguage)) ?: getLanguageName(targetLanguage)
         selectedVoice = prefs.getString("selected_tts_voice", "Devansh") ?: "Devansh"
         authToken = prefs.getString("auth_token", null)
         backendBaseUrl = prefs.getString("backend_base_url", "http://127.0.0.1:8000") ?: "http://127.0.0.1:8000"
@@ -174,9 +287,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
     fun updatePet(key: String, name: String, colorHex: String) {
         petKey = key
         petName = name
-        try {
-            petAccentColor = Color.parseColor(colorHex)
-        } catch (_: Exception) {}
+        petAccentColor = getCharacterColor(key, colorHex)
 
         prefs.edit().putString("pet_key", key)
             .putString("pet_name", name)
@@ -189,56 +300,109 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
         }
     }
 
-    fun updateLanguages(src: String, tgt: String) {
+    fun updateLanguages(src: String, tgt: String, srcName: String? = null, tgtName: String? = null) {
         sourceLanguage = src
         targetLanguage = tgt
+        sourceLanguageName = if (!srcName.isNullOrBlank()) srcName else getLanguageName(src)
+        targetLanguageName = if (!tgtName.isNullOrBlank()) tgtName else getLanguageName(tgt)
+
         prefs.edit().putString("source_lang", src)
             .putString("target_lang", tgt)
+            .putString("source_lang_name", sourceLanguageName)
+            .putString("target_lang_name", targetLanguageName)
             .apply()
 
-        tvLangPair?.text = "$sourceLanguage → $targetLanguage"
+        Handler(Looper.getMainLooper()).post {
+            tvLangPair?.text = "$sourceLanguageName → $targetLanguageName"
+        }
     }
 
     fun updateCardState(
+
         petId: String,
+
         petName: String,
+
         petColor: String,
+
         voiceId: String,
+
         sourceLang: String,
+
         targetLang: String,
+
+        sourceLangName: String? = null,
+
+        targetLangName: String? = null,
+
         originalText: String,
+
         translatedText: String,
+
         correction: String?,
+
         statusNote: String?,
+
         words: String?,
+
         score: Double?,
+
         requestId: String
+
     ) {
+
         this.petKey = petId
         this.petName = petName
-        try {
-            this.petAccentColor = Color.parseColor(petColor)
-        } catch (_: Exception) {}
+        this.petAccentColor = getCharacterColor(petId, petColor)
+
         this.selectedVoice = voiceId
+
         this.sourceLanguage = sourceLang
+
         this.targetLanguage = targetLang
+
+        this.sourceLanguageName = if (!sourceLangName.isNullOrBlank()) sourceLangName else getLanguageName(sourceLang)
+
+        this.targetLanguageName = if (!targetLangName.isNullOrBlank()) targetLangName else getLanguageName(targetLang)
+
         this.spokenText = originalText
+
         this.translatedText = translatedText
+
         this.correctionTip = if (!correction.isNullOrBlank() && correction != "null") correction else null
+
         this.statusNote = statusNote ?: if (translatedText.isNotEmpty()) "Tap Repeat to test your pronunciation!" else "Tap the mic and speak."
+
         this.lastRequestId = requestId
 
+
+
         prefs.edit()
+
             .putString("pet_key", petId)
+
             .putString("pet_name", petName)
+
             .putString("pet_color", petColor)
+
             .putString("selected_tts_voice", voiceId)
+
             .putString("source_lang", sourceLang)
+
             .putString("target_lang", targetLang)
+
+            .putString("source_lang_name", this.sourceLanguageName)
+
+            .putString("target_lang_name", this.targetLanguageName)
+
             .putString("saved_spoken_text", originalText)
+
             .putString("saved_translated_text", translatedText)
+
             .putString("saved_correction", correction)
+
             .putString("saved_status_note", this.statusNote)
+
             .apply()
 
         Handler(Looper.getMainLooper()).post {
@@ -490,6 +654,12 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
         if (startVisible) {
             scheduleAutonomousRoam()
         }
+        // Pre-warm AudioRecord in STOPPED state so first mic tap starts in <15ms
+        audioExecutor.execute {
+            try {
+                getOrCreateAudioRecord()
+            } catch (_: Exception) {}
+        }
     }
 
     private fun scheduleAutonomousRoam() {
@@ -733,6 +903,12 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
     }
 
     private fun createPanelLayout(): FrameLayout {
+        // Pre-warm AudioRecord in STOPPED state upon panel creation
+        audioExecutor.execute {
+            try {
+                getOrCreateAudioRecord()
+            } catch (_: Exception) {}
+        }
         val root = FrameLayout(context).apply {
             val bg = GradientDrawable().apply {
                 setColor(petAccentColor)
@@ -762,7 +938,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
         tvPanelTitle = title
 
         val langPair = TextView(context).apply {
-            text = "$sourceLanguage → $targetLanguage"
+            text = "$sourceLanguageName → $targetLanguageName"
             setTextColor(Color.parseColor("#D9FFFFFF"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             setPadding(dpToPx(8), 0, 0, 0)
@@ -992,7 +1168,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
             }
             panel.background = bg
             tvPanelTitle?.text = petName
-            tvLangPair?.text = "$sourceLanguage → $targetLanguage"
+            tvLangPair?.text = "$sourceLanguageName → $targetLanguageName"
             btnMic?.setColorFilter(petAccentColor)
             if (isRepeatMode) {
                 btnRepeatView?.setTextColor(petAccentColor)
@@ -1204,8 +1380,17 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
 
         stopAudioPlayback()
 
-        Log.i(TAG, "[SpeechService] Overlay TTS request started: text=\"$phrase\", voice=$selectedVoice, lang=$targetLanguage, speed=$rate")
-        tvStatus?.text = if (rate < 1.0f) "Playing slow audio (0.75x)…" else "Speaking…"
+        // 1. Fast cache playback if audio already synthesized for this exact phrase
+        val cached = lastTtsAudioFile
+        if (cached != null && cached.exists() && lastTtsPhrase == phrase) {
+            Log.i(TAG, "[SpeechService] Playing cached synthesized audio with rate=$rate")
+            tvStatus?.text = if (rate < 1.0f) "Playing slow audio (0.75x)…" else "Speaking…"
+            playAudioFile(cached, rate)
+            return
+        }
+
+        Log.i(TAG, "[SpeechService] Overlay TTS request started: text=\"$phrase\", voice=$selectedVoice, lang=$targetLanguage, speed=1.0 (playback rate=$rate)")
+        tvStatus?.text = if (rate < 1.0f) "Synthesizing slow voice…" else "Speaking…"
 
         Thread {
             var audioSuccess = false
@@ -1230,11 +1415,12 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                         setRequestProperty("Authorization", authHeader)
                     }
 
+                    // Always synthesize at speed 1.0; mobile MediaPlayer adjusts tempo via playbackParams
                     val payload = JSONObject().apply {
                         put("text", phrase)
                         put("voice", selectedVoice)
                         put("language", targetLanguage)
-                        put("speed", rate.toDouble())
+                        put("speed", 1.0)
                     }
 
                     conn.outputStream.use { os ->
@@ -1248,8 +1434,13 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                         if (!b64.isNullOrEmpty()) {
                             val rawBytes = Base64.decode(b64, Base64.DEFAULT)
                             val normalizedBytes = normalizeWavBytes(rawBytes)
+                            try {
+                                lastTtsAudioFile?.delete()
+                            } catch (_: Exception) {}
                             val tempFile = File(context.cacheDir, "ext_tts_${System.currentTimeMillis()}.wav")
                             tempFile.writeBytes(normalizedBytes)
+                            lastTtsAudioFile = tempFile
+                            lastTtsPhrase = phrase
 
                             Handler(Looper.getMainLooper()).post {
                                 playAudioFile(tempFile, rate)
@@ -1265,7 +1456,8 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
 
             if (!audioSuccess) {
                 Handler(Looper.getMainLooper()).post {
-                    fallbackAndroidTts(phrase, rate)
+                    tvStatus?.text = "TTS voice unavailable. Check network."
+                    petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('oops');")
                 }
             }
         }.start()
@@ -1381,7 +1573,6 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                 start()
                 setOnCompletionListener {
                     release()
-                    file.delete()
                     activeMediaPlayer = null
                     tvStatus?.text = "Tap Repeat to test your pronunciation!"
                     petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('idle');")
@@ -1549,114 +1740,100 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
     }
 
     private fun startVoiceRecognition() {
+        startAudioCapture(isRepeat = false)
+    }
+
+    private fun startRepeatPractice() {
+        startAudioCapture(isRepeat = true)
+    }
+
+    private fun startAudioCapture(isRepeat: Boolean) {
+        val t1 = System.currentTimeMillis()
+        Log.i(TAG, "[MIC_BENCHMARK] 1_UI_TAP_DETECTED: ${t1}ms (isRepeat=$isRepeat)")
+
+        if (isRepeat) {
+            if (translatedText.isBlank() || translatedText.contains("unavailable", ignoreCase = true)) {
+                tvStatus?.text = "Translate a sentence first before repeat practice."
+                return
+            }
+        }
+
         if (isListening || isRecordingAudio) {
+            Log.i(TAG, "[MIC_BENCHMARK] Toggle stop requested")
             stopVoiceRecognition()
             return
         }
 
-        stopVoiceRecognition()
+        stopVoiceRecognition(releaseRecord = false)
         stopAudioPlayback()
-        isRepeatMode = false
+
+        val t2 = System.currentTimeMillis()
+        Log.i(TAG, "[MIC_BENCHMARK] 2_STATE_CHECK_PASSED: ${t2 - t1}ms")
+
+        isRepeatMode = isRepeat
         updateRepeatButtonUI()
-
-        val sampleRate = 16000
-        val channelConfig = AudioFormat.CHANNEL_IN_MONO
-        val audioFormat = AudioFormat.ENCODING_PCM_16BIT
-        val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
-        val bufferSize = Math.max(minBufferSize, 4096)
-
-        var record: AudioRecord? = null
-        try {
-            record = AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, channelConfig, audioFormat, bufferSize)
-        } catch (e: Exception) {
-            Log.w(TAG, "AudioRecord init failed: ${e.message}")
-        }
-
-        if (record == null || record.state != AudioRecord.STATE_INITIALIZED) {
-            Log.w(TAG, "AudioRecord not initialized, using legacy SpeechRecognizer")
-            startVoiceRecognitionLegacy()
-            return
-        }
-
-        audioRecord = record
-        isRecordingAudio = true
         isListening = true
+        isRecordingAudio = true
 
-        tvStatus?.text = "Listening… speak in $sourceLanguage"
+        val targetLang = if (isRepeat) targetLanguage else sourceLanguage
+        if (isRepeat) {
+            tvStatus?.text = "Say: $translatedText"
+        } else {
+            tvStatus?.text = "Listening… speak in $sourceLanguage"
+        }
         petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('listen');")
 
-        recordingThread = Thread {
-            try {
-                record.startRecording()
-                val shortBuffer = ShortArray(1024)
-                val pcmData = ByteArrayOutputStream()
-                var speechDetected = false
-                var lastSpeechTime = System.currentTimeMillis()
-                val startTime = System.currentTimeMillis()
-                val silenceTimeoutMs = 1800L // 1.8s trailing silence allows natural inter-clause pauses without premature cutoff
-                val maxDurationMs = 30000L
+        val t6 = System.currentTimeMillis()
+        Log.i(TAG, "[MIC_BENCHMARK] 6_UI_LISTENING_RENDERED: ${t6 - t1}ms")
 
-                while (isRecordingAudio) {
-                    val read = record.read(shortBuffer, 0, shortBuffer.size)
-                    if (read > 0) {
-                        var sumSquares = 0.0
-                        for (i in 0 until read) {
-                            val sample = shortBuffer[i].toInt()
-                            sumSquares += sample * sample
-                            pcmData.write(sample and 0xFF)
-                            pcmData.write((sample shr 8) and 0xFF)
-                        }
-                        val rms = kotlin.math.sqrt(sumSquares / read)
-                        val dbfs = if (rms > 0) 20.0 * kotlin.math.log10(rms / 32768.0) else -999.0
-
-                        val now = System.currentTimeMillis()
-                        if (dbfs > -46.0) {
-                            speechDetected = true
-                            lastSpeechTime = now
-                        } else if (speechDetected && (now - lastSpeechTime > silenceTimeoutMs)) {
-                            Log.i(TAG, "Trailing silence detected after speech, completing recording.")
-                            break
-                        }
-
-                        if (now - startTime > maxDurationMs) {
-                            Log.i(TAG, "Max recording duration reached")
-                            break
-                        }
-                    }
-                }
-
-                // Flush trailing 400ms audio buffer to capture complete word endings
-                try {
-                    val flushBuffer = ShortArray(6400)
-                    val readFlush = record.read(flushBuffer, 0, flushBuffer.size)
-                    if (readFlush > 0) {
-                        for (i in 0 until readFlush) {
-                            val sample = flushBuffer[i].toInt()
-                            pcmData.write(sample and 0xFF)
-                            pcmData.write((sample shr 8) and 0xFF)
-                        }
-                    }
-                } catch (_: Exception) {}
-
-                try {
-                    record.stop()
-                    record.release()
-                } catch (_: Exception) {}
-                audioRecord = null
+        val recorder = VoiceActivityRecorder.getInstance(context)
+        recorder.startRecording(object : VoiceActivityRecorder.VadListener {
+            override fun onRecordingStarted(startTimeMs: Long) {}
+            override fun onFirstSpeechDetected(timeMs: Long, dbfs: Double, rms: Double) {
+                tvStatus?.text = if (isRepeat) "Speech detected…" else "Listening… speech detected"
+            }
+            override fun onSpeechActive(timeMs: Long, dbfs: Double, rms: Double) {}
+            override fun onSilenceThresholdReached(timeMs: Long, silenceDurationMs: Long) {
+                tvStatus?.text = "Silence detected. Finalizing…"
+            }
+            override fun onRecordingStopped(
+                wavFile: File?,
+                rawPcm: ByteArray,
+                speechDetected: Boolean,
+                durationSec: Double
+            ) {
+                isListening = false
                 isRecordingAudio = false
-
-                val rawPcm = pcmData.toByteArray()
-                val durationSec = rawPcm.size / 32000.0
-
-                Handler(Looper.getMainLooper()).post {
-                    isListening = false
-                    if (rawPcm.isEmpty() || (!speechDetected && durationSec < 0.4)) {
-                        tvStatus?.text = "Nothing heard. Tap mic and try again."
-                        petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('idle');")
+                if (wavFile == null || !speechDetected || durationSec < 0.4) {
+                    tvStatus?.text = if (isRepeat) "Could not capture clear speech. Tap Repeat to try again." else "Nothing heard. Tap mic and try again."
+                    petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('idle');")
+                    if (isRepeat) {
+                        isRepeatMode = false
+                        updateRepeatButtonUI()
+                    }
+                } else {
+                    val wavBytes = wavFile.readBytes()
+                    if (isRepeat) {
+                        tvStatus?.text = "Evaluating pronunciation with Gnani Prisma…"
+                        uploadWavToGnaniStt(
+                            wavBytes = wavBytes,
+                            langCode = targetLanguage,
+                            onSuccess = { transcript ->
+                                evaluatePronunciation(transcript)
+                            },
+                            onError = { err ->
+                                Log.w(TAG, "Repeat STT error: $err")
+                                Handler(Looper.getMainLooper()).post {
+                                    tvStatus?.text = "Could not capture clear speech. Tap Repeat to try again."
+                                    petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('idle');")
+                                    isRepeatMode = false
+                                    updateRepeatButtonUI()
+                                }
+                            }
+                        )
                     } else {
                         tvStatus?.text = "Transcribing with Gnani Prisma v3.0…"
                         petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('think');")
-                        val wavBytes = makeWav(rawPcm, sampleRate, 1, 16)
                         uploadWavToGnaniStt(
                             wavBytes = wavBytes,
                             langCode = sourceLanguage,
@@ -1670,15 +1847,15 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
                         )
                     }
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error in audio recording thread: ${e.message}", e)
-                Handler(Looper.getMainLooper()).post {
-                    isListening = false
-                    isRecordingAudio = false
-                    startVoiceRecognitionLegacy()
-                }
             }
-        }.apply { start() }
+
+            override fun onError(message: String) {
+                isListening = false
+                isRecordingAudio = false
+                tvStatus?.text = "Audio error. Tap mic to try again."
+                petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('idle');")
+            }
+        })
     }
 
     private fun startVoiceRecognitionLegacy() {
@@ -1732,142 +1909,6 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
             isListening = false
             tvStatus?.text = "Microphone error: ${e.message}"
         }
-    }
-
-    private fun startRepeatPractice() {
-        if (translatedText.isBlank() || translatedText.contains("unavailable", ignoreCase = true)) {
-            tvStatus?.text = "Translate a sentence first before repeat practice."
-            return
-        }
-
-        if (isListening || isRecordingAudio) {
-            stopVoiceRecognition()
-            return
-        }
-
-        stopVoiceRecognition()
-        stopAudioPlayback()
-
-        isRepeatMode = true
-        updateRepeatButtonUI()
-
-        val sampleRate = 16000
-        val channelConfig = AudioFormat.CHANNEL_IN_MONO
-        val audioFormat = AudioFormat.ENCODING_PCM_16BIT
-        val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
-        val bufferSize = Math.max(minBufferSize, 4096)
-
-        var record: AudioRecord? = null
-        try {
-            record = AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, channelConfig, audioFormat, bufferSize)
-        } catch (e: Exception) {
-            Log.w(TAG, "AudioRecord init failed for repeat: ${e.message}")
-        }
-
-        if (record == null || record.state != AudioRecord.STATE_INITIALIZED) {
-            Log.w(TAG, "AudioRecord not initialized, using legacy repeat recognizer")
-            startRepeatPracticeLegacy()
-            return
-        }
-
-        audioRecord = record
-        isRecordingAudio = true
-        isListening = true
-
-        tvStatus?.text = "Say: $translatedText"
-        petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('listen');")
-
-        recordingThread = Thread {
-            try {
-                record.startRecording()
-                val shortBuffer = ShortArray(1024)
-                val pcmData = ByteArrayOutputStream()
-                var speechDetected = false
-                var lastSpeechTime = System.currentTimeMillis()
-                val startTime = System.currentTimeMillis()
-                val silenceTimeoutMs = 1800L
-                val maxDurationMs = 25000L
-
-                while (isRecordingAudio) {
-                    val read = record.read(shortBuffer, 0, shortBuffer.size)
-                    if (read > 0) {
-                        var sumSquares = 0.0
-                        for (i in 0 until read) {
-                            val sample = shortBuffer[i].toInt()
-                            sumSquares += sample * sample
-                            pcmData.write(sample and 0xFF)
-                            pcmData.write((sample shr 8) and 0xFF)
-                        }
-                        val rms = kotlin.math.sqrt(sumSquares / read)
-                        val dbfs = if (rms > 0) 20.0 * kotlin.math.log10(rms / 32768.0) else -999.0
-
-                        val now = System.currentTimeMillis()
-                        if (dbfs > -46.0) {
-                            speechDetected = true
-                            lastSpeechTime = now
-                        } else if (speechDetected && (now - lastSpeechTime > silenceTimeoutMs)) {
-                            Log.i(TAG, "Repeat silence detected, ending recording.")
-                            break
-                        }
-
-                        if (now - startTime > maxDurationMs) {
-                            break
-                        }
-                    }
-                }
-
-                try {
-                    val flushBuffer = ShortArray(6400)
-                    val readFlush = record.read(flushBuffer, 0, flushBuffer.size)
-                    if (readFlush > 0) {
-                        for (i in 0 until readFlush) {
-                            val sample = flushBuffer[i].toInt()
-                            pcmData.write(sample and 0xFF)
-                            pcmData.write((sample shr 8) and 0xFF)
-                        }
-                    }
-                } catch (_: Exception) {}
-
-                try {
-                    record.stop()
-                    record.release()
-                } catch (_: Exception) {}
-                audioRecord = null
-                isRecordingAudio = false
-
-                val rawPcm = pcmData.toByteArray()
-                Handler(Looper.getMainLooper()).post {
-                    isListening = false
-                    if (rawPcm.isEmpty() || (!speechDetected && rawPcm.size < 32000 * 0.4)) {
-                        tvStatus?.text = "Could not capture clear speech. Tap Repeat to try again."
-                        petWebView?.loadUrl("javascript:if(window.setMode)window.setMode('idle');")
-                        isRepeatMode = false
-                        updateRepeatButtonUI()
-                    } else {
-                        tvStatus?.text = "Evaluating pronunciation with Gnani Prisma…"
-                        val wavBytes = makeWav(rawPcm, sampleRate, 1, 16)
-                        uploadWavToGnaniStt(
-                            wavBytes = wavBytes,
-                            langCode = if (targetLanguage.contains("en", ignoreCase = true)) "en-IN" else targetLanguage,
-                            onSuccess = { transcript ->
-                                evaluatePronunciation(transcript)
-                            },
-                            onError = { err ->
-                                Log.w(TAG, "Gnani repeat STT error: $err, trying legacy")
-                                startRepeatPracticeLegacy()
-                            }
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error in repeat recording: ${e.message}", e)
-                Handler(Looper.getMainLooper()).post {
-                    isListening = false
-                    isRecordingAudio = false
-                    startRepeatPracticeLegacy()
-                }
-            }
-        }.apply { start() }
     }
 
     private fun startRepeatPracticeLegacy() {
@@ -1992,14 +2033,22 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
         } catch (_: Exception) {}
     }
 
-    private fun stopVoiceRecognition() {
+    private fun stopVoiceRecognition(releaseRecord: Boolean = false) {
         isListening = false
         isRecordingAudio = false
         try {
-            audioRecord?.stop()
-            audioRecord?.release()
+            VoiceActivityRecorder.getInstance(context).cancelRecording()
+            if (releaseRecord) {
+                VoiceActivityRecorder.getInstance(context).release()
+            }
         } catch (_: Exception) {}
-        audioRecord = null
+        try {
+            audioRecord?.stop()
+            if (releaseRecord) {
+                audioRecord?.release()
+                audioRecord = null
+            }
+        } catch (_: Exception) {}
         try {
             speechRecognizer?.stopListening()
             speechRecognizer?.cancel()
@@ -2012,7 +2061,10 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
         cancelAutonomousRoam()
         hidePet()
         stopAudioPlayback()
-        stopVoiceRecognition()
+        stopVoiceRecognition(releaseRecord = true)
+        try {
+            audioExecutor.shutdownNow()
+        } catch (_: Exception) {}
         tts?.stop()
         tts?.shutdown()
         tts = null
@@ -2028,7 +2080,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
  * matching `PronunciationScorer` in Flutter.
  */
 object OverlayPronunciationScorer {
-    private val punctRegex = Regex("""[.,\/#!$%\^&\*;:{}=\-_`~()?"।॥]""")
+    private val punctRegex = Regex("""[.,\/#!$%\^&\*;:{}=\-_`~()?"।॥¿¡]""")
     private val multiSpaceRegex = Regex("""\s+""")
 
     fun tokenize(text: String): List<String> {

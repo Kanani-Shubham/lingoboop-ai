@@ -28,6 +28,9 @@
 | `overlay_enabled` | `bool` |  |
 | `overlay_position_x` | `numeric` |  Nullable |
 | `overlay_position_y` | `numeric` |  Nullable |
+| `selected_voice_id` | `text` |  |
+| `selected_voice_provider` | `text` |  |
+| `selected_voice_language` | `text` |  |
 
 ## Table `user_languages`
 
