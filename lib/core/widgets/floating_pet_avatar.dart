@@ -100,6 +100,12 @@ class _FloatingPetAvatarState extends State<FloatingPetAvatar> {
     }
   }
 
+  void _triggerPulseInViewer() {
+    if (_isWebViewReady && _webController != null) {
+      _webController?.runJavaScript("if (window.triggerPulse) window.triggerPulse();");
+    }
+  }
+
   @override
   void didUpdateWidget(covariant FloatingPetAvatar oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -131,7 +137,8 @@ class _FloatingPetAvatarState extends State<FloatingPetAvatar> {
       onPointerMove: (event) {
         if (_pointerStart == null) return;
         final delta = event.position - _pointerStart!;
-        if (!_hasMoved && delta.distance > 6.0) {
+        // Use 18.0 logical pixel slop so natural finger taps on high-density screens register immediately
+        if (!_hasMoved && delta.distance > 18.0) {
           _hasMoved = true;
         }
         if (_hasMoved) {
@@ -142,6 +149,7 @@ class _FloatingPetAvatarState extends State<FloatingPetAvatar> {
         if (_hasMoved) {
           widget.onDragEnd();
         } else {
+          _triggerPulseInViewer();
           widget.onTap();
         }
         _pointerStart = null;

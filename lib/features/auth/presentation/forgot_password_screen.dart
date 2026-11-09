@@ -80,7 +80,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Enter the email associated with your LingoBoom account to receive recovery instructions.',
+                  'Enter the email associated with your TalkTails account to receive recovery instructions.',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: AppColors.textMuted,
                         fontSize: 15,

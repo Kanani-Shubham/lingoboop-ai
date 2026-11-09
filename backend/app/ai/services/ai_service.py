@@ -218,7 +218,7 @@ YOU MUST ALWAYS RESPOND IN STRICT VALID JSON MATCHING THIS EXACT SCHEMA:
         if not settings.is_groq_configured():
             return self._build_offline_daily_practice(req, today_str)
 
-        prompt = f"""You are an elite multilingual language curriculum architect for LingoBoom.
+        prompt = f"""You are an elite multilingual language curriculum architect for TalkTails.
 Generate exactly {req.count} practical everyday speaking practice sentences for a learner at '{req.proficiency_level}' level.
 The learner's native language is {native_lang_name} ({req.native_language}) and target language is {target_lang_name} ({req.target_language}).
 {category_instruction}
@@ -282,42 +282,216 @@ YOU MUST RESPOND ONLY IN STRICT VALID JSON MATCHING THIS EXACT FORMAT:
         return self._build_offline_daily_practice(req, today_str)
 
     def _build_offline_daily_practice(self, req: DailyPracticeRequest, today_str: str) -> DailyPracticeResponse:
-        """Curated offline fallback set of practical everyday sentences."""
-        curated_base = [
-            ("Where is the nearest railway station?", "નજીકનું રેલવે સ્ટેશન ક્યાં છે?", "Asking Directions"),
-            ("Please give me two cups of hot tea.", "કૃપા કરીને મને બે કપ ગરમ ચા આપો.", "Ordering Food"),
-            ("My name is Shubham, and I am learning English.", "મારું નામ શુભમ છે, અને હું અંગ્રેજી શીખી રહ્યો છું.", "Self-Introduction"),
-            ("How much does this cost?", "આ કેટલાનું છે?", "Shopping"),
-            ("Could you please speak a little slower?", "શું તમે થોડું ધીમે બોલી શકશો?", "Daily Conversation"),
-            ("I need help with my luggage.", "મને મારા સામાનમાં મદદ જોઈએ છે.", "Travel"),
-            ("Can I get the bill, please?", "શું મને બિલ મળી શકે?", "Ordering Food"),
-            ("What time does the store open?", "દુકાન કેટલા વાગ્યે ખુલે છે?", "Shopping"),
-            ("It is very nice to meet you.", "તમને મળીને ઘણો આનંદ થયો.", "Self-Introduction"),
-            ("Could you repeat that once more?", "શું તમે એક વાર ફરીથી બોલશો?", "Daily Conversation"),
-            ("I am looking for the entrance.", "હું પ્રવેશદ્વાર શોધી રહ્યો છું.", "Asking Directions"),
-            ("I have an interview today.", "આજે મારો ઇન્ટરવ્યુ છે.", "Interviews"),
-            ("Let's schedule a meeting tomorrow.", "ચાલો આવતીકાલે મીટિંગ રાખીએ.", "Workplace Communication"),
-            ("What are your plans for the weekend?", "વીકએન્ડ માટે તમારું શું પ્લાન છે?", "Friends & Social"),
-            ("I will call you back in ten minutes.", "હું તમને દસ મિનિટમાં પાછો ફોન કરું છું.", "Phone Conversations"),
-            ("Could you explain this topic to me?", "શું તમે મને આ વિષય સમજાવી શકશો?", "Education"),
-            ("Where can I find drinking water?", "પીવાનું પાણી ક્યાં મળશે?", "Asking Directions"),
-            ("I would like to order a vegetarian meal.", "હું શાકાહારી ભોજન ઓર્ડર કરવા માંગુ છું.", "Ordering Food"),
-            ("Thank you very much for your kind help.", "તમારી મદદ માટે ખૂબ ખૂબ આભાર.", "Daily Conversation"),
-            ("Have a wonderful day ahead!", "તમારો દિવસ શુભ રહે!", "Friends & Social"),
+        """Curated offline multilingual fallback set of practical everyday sentences."""
+        src_code = req.native_language.lower().split("-")[0]
+        tgt_code = req.target_language.lower().split("-")[0]
+
+        # Multilingual phrase matrix across major supported languages
+        multilingual_phrases = [
+            {
+                "cat": "Asking Directions",
+                "translations": {
+                    "en": "Where is the nearest railway station?",
+                    "gu": "નજીકનું રેલવે સ્ટેશન ક્યાં છે?",
+                    "bn": "কাছের রেলওয়ে স্টেশনটি কোথায়?",
+                    "hi": "निकटतम रेलवे स्टेशन कहाँ है?",
+                    "ta": "அருகிலுள்ள ரயில் நிலையம் எங்கே உள்ளது?",
+                    "te": "సమీపంలోని రైల్వే స్టేషన్ ఎక్కడ ఉంది?",
+                    "mr": "जवळचे रेल्वे स्टेशन कुठे आहे?",
+                },
+                "guide": "Where iz the neer-est rayl-way stay-shun?",
+            },
+            {
+                "cat": "Ordering Food",
+                "translations": {
+                    "en": "Please give me two cups of hot tea.",
+                    "gu": "કૃપા કરીને મને બે કપ ગરમ ચા આપો.",
+                    "bn": "দয়া করে আমাকে দুই কাপ গরম চা দিন।",
+                    "hi": "कृपया मुझे दो कप गर्म चाय दीजिए।",
+                    "ta": "தயவுசெய்து எனக்கு இரண்டு சூடான தேநீர் கொடுங்கள்.",
+                    "te": "దయచేసి నాకు రెండు కప్పుల వేడి టీ ఇవ్వండి.",
+                    "mr": "कृपया मला दोन कप गरम चहा द्या.",
+                },
+                "guide": "Pleez giv mee too cups ov hot tee.",
+            },
+            {
+                "cat": "Self-Introduction",
+                "translations": {
+                    "en": "Hello, I am learning this language.",
+                    "gu": "નમસ્તે, હું આ ભાષા શીખી રહ્યો છું.",
+                    "bn": "নমস্কার, আমি এই ভাষাটি শিখছি।",
+                    "hi": "नमस्ते, मैं यह भाषा सीख रहा हूँ।",
+                    "ta": "வணக்கம், நான் இந்த மொழியைக் கற்றுக்கொள்கிறேன்.",
+                    "te": "నమస్కారం, నేను ఈ భాష నేర్చుకుంటున్నాను.",
+                    "mr": "नमस्कार, मी ही भाषा शिकत आहे.",
+                },
+                "guide": "Hel-loh, eye am ler-ning this lang-gwij.",
+            },
+            {
+                "cat": "Shopping",
+                "translations": {
+                    "en": "How much does this item cost?",
+                    "gu": "આ કેટલાનું છે?",
+                    "bn": "এটার দাম কত?",
+                    "hi": "इसकी कीमत कितनी है?",
+                    "ta": "இதன் விலை என்ன?",
+                    "te": "దీని ధర ఎంత?",
+                    "mr": "याची किंमत किती आहे?",
+                },
+                "guide": "How much duz this eye-tem kost?",
+            },
+            {
+                "cat": "Daily Conversation",
+                "translations": {
+                    "en": "Could you please speak a little slower?",
+                    "gu": "શું તમે થોડું ધીમે બોલી શકશો?",
+                    "bn": "আপনি কি একটু ধীরে কথা বলতে পারবেন?",
+                    "hi": "क्या आप थोड़ा धीरे बोल सकते हैं?",
+                    "ta": "தயவுசெய்து கொஞ்சம் மெதுவாக பேச முடியுமா?",
+                    "te": "మీరు కొంచెం నెమ్మదిగా మాట్లాడగలరా?",
+                    "mr": "तुम्ही थोडे हळू बोलू शकाल का?",
+                },
+                "guide": "Kood yoo pleez speek uh lit-ul sloh-er?",
+            },
+            {
+                "cat": "Travel",
+                "translations": {
+                    "en": "I need help with my luggage.",
+                    "gu": "મને મારા સામાનમાં મદદ જોઈએ છે.",
+                    "bn": "আমার লাগেজ নিয়ে একটু সাহায্য দরকার।",
+                    "hi": "मुझे अपने सामान के साथ मदद चाहिए।",
+                    "ta": "எனது சாமான்களுக்கு உதவி தேவை.",
+                    "te": "నా లగేజీతో నాకు సహాయం కావాలి.",
+                    "mr": "मला माझ्या सामानासाठी मदत हवी आहे.",
+                },
+                "guide": "Eye need help with my luh-gij.",
+            },
+            {
+                "cat": "Ordering Food",
+                "translations": {
+                    "en": "Can I get the bill, please?",
+                    "gu": "શું મને બિલ મળી શકે?",
+                    "bn": "দয়া করে বিলটা কি পেতে পারি?",
+                    "hi": "क्या मुझे बिल मिल सकता है?",
+                    "ta": "தயவுசெய்து எனக்கு பில் கிடைக்குமா?",
+                    "te": "దయచేసి నాకు బిల్ ఇవ్వగలరా?",
+                    "mr": "मला बिल मिळू शकेल का?",
+                },
+                "guide": "Kan eye get thuh bil, pleez?",
+            },
+            {
+                "cat": "Shopping",
+                "translations": {
+                    "en": "What time does the store open?",
+                    "gu": "દુકાન કેટલા વાગ્યે ખુલે છે?",
+                    "bn": "দোকানটি কখন খোলে?",
+                    "hi": "दुकान कितने बजे खुलती है?",
+                    "ta": "கடை எத்தனை மணிக்கு திறக்கும்?",
+                    "te": "దుకాణం ఏ సమయానికి తెరుస్తారు?",
+                    "mr": "दुकान किती वाजता उघडते?",
+                },
+                "guide": "Waht tyme duz thuh stor oh-pen?",
+            },
+            {
+                "cat": "Self-Introduction",
+                "translations": {
+                    "en": "It is very nice to meet you.",
+                    "gu": "તમને મળીને ઘણો આનંદ થયો.",
+                    "bn": "আপনার সাথে দেখা করে খুব ভালো লাগলো।",
+                    "hi": "आपसे मिलकर बहुत अच्छा लगा।",
+                    "ta": "உங்களை சந்தித்ததில் மிக்க மகிழ்ச்சி.",
+                    "te": "మిమ్మల్ని కలవడం చాలా సంతోషంగా ఉంది.",
+                    "mr": "तुम्हाला भेटून खूप आनंद झाला.",
+                },
+                "guide": "It iz ve-ree nys too meet yoo.",
+            },
+            {
+                "cat": "Daily Conversation",
+                "translations": {
+                    "en": "Could you repeat that once more?",
+                    "gu": "શું તમે એક વાર ફરીથી બોલશો?",
+                    "bn": "আপনি কি এটি আর একবার বলতে পারেন?",
+                    "hi": "क्या आप इसे एक बार फिर दोहरा सकते हैं?",
+                    "ta": "இதை மீண்டும் ஒருமுறை கூற முடியுமா?",
+                    "te": "దీన్ని మరోసారి చెప్పగలరా?",
+                    "mr": "तुम्ही पुन्हा एकदा सांगू शकाल का?",
+                },
+                "guide": "Kood yoo ree-peet that wuns mor?",
+            },
+            {
+                "cat": "Asking Directions",
+                "translations": {
+                    "en": "I am looking for the entrance.",
+                    "gu": "હું પ્રવેશદ્વાર શોધી રહ્યો છું.",
+                    "bn": "আমি প্রবেশদ্বার খুঁজছি।",
+                    "hi": "मैं प्रवेश द्वार ढूंढ रहा हूँ।",
+                    "ta": "நான் நுழைவு வாயிலை தேடுகிறேன்.",
+                    "te": "నేను ప్రవేశ ద్వారం కోసం చూస్తున్నాను.",
+                    "mr": "मी प्रवेशद्वार शोधत आहे.",
+                },
+                "guide": "Eye am look-ing for thuh en-trans.",
+            },
+            {
+                "cat": "Interviews",
+                "translations": {
+                    "en": "I am prepared for the discussion today.",
+                    "gu": "હું આજે ચર્ચા માટે તૈયાર છું.",
+                    "bn": "আমি আজকের আলোচনার জন্য প্রস্তুত।",
+                    "hi": "मैं आज की चर्चा के लिए तैयार हूँ।",
+                    "ta": "இன்றைய கலந்துரையாடலுக்கு நான் தயாராக உள்ளேன்.",
+                    "te": "ఈరోజు చర్చకు నేను సిద్ధంగా ఉన్నాను.",
+                    "mr": "मी आजच्या चर्चेसाठी तयार आहे.",
+                },
+                "guide": "Eye am pre-paird for thuh dis-kush-un tuh-day.",
+            },
+            {
+                "cat": "Workplace Communication",
+                "translations": {
+                    "en": "Let us schedule a meeting tomorrow.",
+                    "gu": "ચાલો આવતીકાલે મીટિંગ રાખીએ.",
+                    "bn": "আসুন আগামীকাল একটি মিটিং নির্ধারণ করি।",
+                    "hi": "आइए कल एक बैठक निर्धारित करें।",
+                    "ta": "நாளை ஒரு சந்திப்பை ஏற்பாடு செய்வோம்.",
+                    "te": "రేపు ఒక సమావేశాన్ని ఏర్పాటు చేసుకుందాం.",
+                    "mr": "चला उद्या एक बैठक ठरवूया.",
+                },
+                "guide": "Let us sked-yool uh mee-ting tuh-mor-oh.",
+            },
+            {
+                "cat": "Daily Conversation",
+                "translations": {
+                    "en": "Thank you very much for your kind help.",
+                    "gu": "તમારી મદદ માટે ખૂબ ખૂબ આભાર.",
+                    "bn": "আপনার সদয় সাহায্যের জন্য আপনাকে অনেক ধন্যবাদ।",
+                    "hi": "आपकी उदार सहायता के लिए बहुत-बहुत धन्यवाद।",
+                    "ta": "உங்கள் கனிவான உதவிக்கு மிக்க நன்றி.",
+                    "te": "మీ దయతో కూడిన సహాయానికి చాలా ధన్యవాదాలు.",
+                    "mr": "तुमच्या मदतीबद्दल खूप खूप धन्यवाद.",
+                },
+                "guide": "Thank yoo ve-ree much for yoor kynd help.",
+            },
         ]
 
-        items = [
-            DailyPracticeItem(
-                id=f"curated_{i+1}",
-                target_sentence=target,
-                native_translation=native,
-                category=cat,
-                difficulty=req.proficiency_level,
-                pronunciation_guide=None,
-                context_tip=f"Everyday spoken phrase for {cat}.",
+        items = []
+        for i, entry in enumerate(multilingual_phrases[: req.count]):
+            cat = entry["cat"]
+            t_map = entry["translations"]
+            # Extract target and native sentences based on requested language pair
+            target_text = t_map.get(tgt_code) or t_map.get("en", "")
+            native_text = t_map.get(src_code) or t_map.get("gu") or t_map.get("en", "")
+            guide = entry["guide"] if tgt_code == "en" else None
+
+            items.append(
+                DailyPracticeItem(
+                    id=f"curated_{i+1}",
+                    target_sentence=target_text,
+                    native_translation=native_text,
+                    category=cat,
+                    difficulty=req.proficiency_level,
+                    pronunciation_guide=guide,
+                    context_tip=f"Everyday spoken practice for {cat}.",
+                )
             )
-            for i, (target, native, cat) in enumerate(curated_base[: req.count])
-        ]
 
         return DailyPracticeResponse(
             date=today_str,

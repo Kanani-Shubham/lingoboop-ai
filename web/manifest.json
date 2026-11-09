@@ -1,11 +1,11 @@
 {
-    "name": "lingoboop",
-    "short_name": "lingoboop",
+    "name": "TalkTails",
+    "short_name": "TalkTails",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "TalkTails — AI Language Companion",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

@@ -47,7 +47,7 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
                       Icon(Icons.stars, size: 16, color: state.activePet.accentColor),
                       const SizedBox(width: 6),
                       Text(
-                        'LINGOBOOM PRO',
+                        'TALKTAILS PRO',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
@@ -150,7 +150,7 @@ class _SubscriptionScreenState extends ConsumerState<SubscriptionScreen> {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                         title: const Text('Subscription Active!'),
                         content: Text(
-                          'You are now subscribed to the LingoBoom Pro ${_selectedPlan == "yearly" ? "₹49/year" : "₹9/month"} plan. All 6 pets and 1,800s daily quota are unlocked!',
+                          'You are now subscribed to the TalkTails Pro ${_selectedPlan == "yearly" ? "₹49/year" : "₹9/month"} plan. All 6 pets and 1,800s daily quota are unlocked!',
                         ),
                         actions: [
                           TextButton(

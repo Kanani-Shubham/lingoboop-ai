@@ -212,9 +212,23 @@ class _PolyCardWidgetState extends ConsumerState<PolyCardWidget>
               ],
             ],
 
-            // #lyr: Karaoke lyrics view
-            const SizedBox(height: 4),
-            KaraokeLyricsView(words: state.words),
+            // Clean idle UI prompt when no conversation active
+            if (state.spokenText.isEmpty && state.words.isEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                "Hi! I'm ready. Speak something to translate.",
+                style: GoogleFonts.fredoka(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                  color: const Color(0xE6FFFFFF),
+                ),
+              ),
+              const SizedBox(height: 6),
+            ] else ...[
+              // #lyr: Karaoke lyrics view
+              const SizedBox(height: 4),
+              KaraokeLyricsView(words: state.words),
+            ],
 
             // AI correction / tip
             if (state.correction != null && state.correction!.isNotEmpty) ...[

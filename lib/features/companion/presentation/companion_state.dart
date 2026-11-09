@@ -10,6 +10,16 @@ import '../../../core/services/user_data_service.dart';
 import '../../../core/utils/pronunciation_scorer.dart';
 import '../../../core/widgets/karaoke_lyrics_view.dart';
 
+enum ConversationStatus {
+  idle,
+  recording,
+  processing,
+  translated,
+  error,
+  practiceActive,
+  practiceCompleted,
+}
+
 class CompanionState {
   final CharacterModel activePet;
   final LanguageItem sourceLanguage;
@@ -35,6 +45,8 @@ class CompanionState {
   final String aiProvider;
   final List<Map<String, String>> conversationHistory;
   final String selectedVoice;
+  final ConversationStatus conversationStatus;
+  final int activeRequestId;
 
   const CompanionState({
     required this.activePet,
@@ -61,6 +73,8 @@ class CompanionState {
     this.aiProvider = 'groq',
     this.conversationHistory = const [],
     this.selectedVoice = 'Shivani',
+    this.conversationStatus = ConversationStatus.idle,
+    this.activeRequestId = 0,
   });
 
   CompanionState copyWith({
@@ -88,6 +102,8 @@ class CompanionState {
     String? aiProvider,
     List<Map<String, String>>? conversationHistory,
     String? selectedVoice,
+    ConversationStatus? conversationStatus,
+    int? activeRequestId,
   }) {
     return CompanionState(
       activePet: activePet ?? this.activePet,
@@ -114,6 +130,8 @@ class CompanionState {
       aiProvider: aiProvider ?? this.aiProvider,
       conversationHistory: conversationHistory ?? this.conversationHistory,
       selectedVoice: selectedVoice ?? this.selectedVoice,
+      conversationStatus: conversationStatus ?? this.conversationStatus,
+      activeRequestId: activeRequestId ?? this.activeRequestId,
     );
   }
 }
@@ -129,6 +147,16 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
         ) {
     SpeechService.instance.resolveBackendUrl().then((url) {
       OverlayService.instance.updateBackendUrl(url);
+    });
+    _playbackSub = SpeechService.instance.playbackActiveStream.listen((isPlaying) {
+      if (!mounted) return;
+      if (isPlaying) {
+        state = state.copyWith(petMode: 'talk');
+      } else {
+        if (state.petMode == 'talk') {
+          state = state.copyWith(petMode: 'idle');
+        }
+      }
     });
     _loadInitialUserData();
   }
@@ -232,93 +260,93 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
   }
 
   Timer? _karaokeTimer;
-
   Timer? _previewDebounceTimer;
-
   StreamSubscription? _liveSpeechSub;
-
+  StreamSubscription<bool>? _playbackSub;
   int _translationToken = 0;
-
+  int _activeRequestId = 0;
   String _repeatHeardText = '';
 
-
-
   void _syncOverlayCard([double? score]) {
-
     final pet = state.activePet;
-
     final colorHex = '#${pet.accentColor.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
-
     OverlayService.instance.updateCardState(
-
       petId: pet.key,
-
       petName: pet.name,
-
       petColorHex: colorHex,
-
       voiceId: state.selectedVoice,
-
       sourceLanguage: state.sourceLanguage.bcp47,
-
       targetLanguage: state.targetLanguage.bcp47,
-
       sourceLanguageName: state.sourceLanguage.name,
-
       targetLanguageName: state.targetLanguage.name,
-
       originalText: state.spokenText,
-
       translatedText: state.translatedText,
-
       correction: state.correction,
-
       statusNote: state.statusNote,
-
       words: state.words.map((w) => w.text).toList(),
-
       pronunciationScore: score,
-
+      requestId: _activeRequestId.toString(),
     );
-
   }
-
-
 
   void syncCardToOverlay() {
-
     _syncOverlayCard();
-
   }
 
-
+  /// Clears active practice prompt and returns companion to clean idle state
+  void clearActivePracticePrompt() {
+    _activeRequestId++;
+    state = state.copyWith(
+      spokenText: '',
+      translatedText: '',
+      correction: null,
+      explanation: null,
+      examples: const [],
+      words: const [],
+      statusNote: 'Tap the mic and speak.',
+      petMode: 'idle',
+      conversationStatus: ConversationStatus.practiceCompleted,
+      activeRequestId: _activeRequestId,
+    );
+    // Explicitly clear overlay cache so returning home does not restore practice text
+    final pet = state.activePet;
+    final colorHex = '#${pet.accentColor.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+    OverlayService.instance.updateCardState(
+      petId: pet.key,
+      petName: pet.name,
+      petColorHex: colorHex,
+      voiceId: state.selectedVoice,
+      sourceLanguage: state.sourceLanguage.bcp47,
+      targetLanguage: state.targetLanguage.bcp47,
+      sourceLanguageName: state.sourceLanguage.name,
+      targetLanguageName: state.targetLanguage.name,
+      originalText: '',
+      translatedText: '',
+      correction: null,
+      statusNote: 'Tap the mic and speak.',
+      words: const [],
+      requestId: _activeRequestId.toString(),
+    );
+  }
 
   Future<void> syncFromNativeOverlay() async {
-
-    final nativeState = await OverlayService.instance.getLatestCardState();
-
-    if (nativeState == null) return;
-
-    final nativeSpoken = nativeState['originalText'] as String?;
-
-    final nativeTrans = nativeState['translatedText'] as String?;
-
-    final nativeCorr = nativeState['correction'] as String?;
-
-    if (nativeTrans != null && nativeTrans.isNotEmpty && nativeTrans != state.translatedText) {
-
-      updateFromExternalOverlay(
-
-        spoken: nativeSpoken ?? '',
-
-        translated: nativeTrans,
-
-        correction: nativeCorr,
-
-      );
-
+    // Prevent resurrecting stale overlay text if practice was completed and state is idle
+    if (state.conversationStatus == ConversationStatus.practiceCompleted && state.translatedText.isEmpty) {
+      return;
     }
 
+    final nativeState = await OverlayService.instance.getLatestCardState();
+    if (nativeState == null) return;
+    final nativeSpoken = nativeState['originalText'] as String?;
+    final nativeTrans = nativeState['translatedText'] as String?;
+    final nativeCorr = nativeState['correction'] as String?;
+    if (nativeTrans != null && nativeTrans.isNotEmpty && nativeTrans != state.translatedText) {
+      updateFromExternalOverlay(
+        spoken: nativeSpoken ?? '',
+        translated: nativeTrans,
+        correction: nativeCorr,
+      );
+    }
   }
 
   void setTtsVoice(String voice) {
@@ -441,6 +469,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     _karaokeTimer?.cancel();
     _previewDebounceTimer?.cancel();
     _liveSpeechSub?.cancel();
+    final reqId = ++_activeRequestId;
 
     state = state.copyWith(
       isListening: true,
@@ -449,6 +478,8 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
       petMode: 'listen',
       statusNote: 'Listening... speak in ${state.sourceLanguage.name}',
       spokenText: '',
+      conversationStatus: ConversationStatus.recording,
+      activeRequestId: reqId,
     );
 
     final srcLangCode = state.sourceLanguage.bcp47;
@@ -456,15 +487,19 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     if (!mounted) return;
     _liveSpeechSub = SpeechService.instance.liveSpeechEvents.listen((event) {
       if (!mounted) return;
+      if (reqId != _activeRequestId) {
+        debugPrint('[STALE_DISCARD] Discarding event for outdated speech turn #$reqId (active: #$_activeRequestId)');
+        return;
+      }
       final ev = event['event'] as String?;
       if (ev == 'speech_detected') {
         state = state.copyWith(statusNote: 'Speech detected…', petMode: 'listen');
       } else if (ev == 'silence_detected') {
         state = state.copyWith(statusNote: 'Silence detected. Finalizing…', petMode: 'think');
       } else if (ev == 'processing') {
-        state = state.copyWith(statusNote: 'Processing audio…', petMode: 'think');
+        state = state.copyWith(statusNote: 'Processing audio…', petMode: 'think', conversationStatus: ConversationStatus.processing);
       } else if (ev == 'transcribing') {
-        state = state.copyWith(statusNote: 'Transcribing with Gnani Prisma v3.0…', petMode: 'think');
+        state = state.copyWith(statusNote: 'Transcribing with Gnani Prisma v3.0…', petMode: 'think', conversationStatus: ConversationStatus.processing);
       } else if (ev == 'partial') {
         final text = (event['text'] as String?)?.trim() ?? '';
         if (text.isNotEmpty && state.isListening && !state.isRepeatPracticing) {
@@ -481,12 +516,13 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
         final text = (event['text'] as String?)?.trim() ?? '';
         _previewDebounceTimer?.cancel();
         if (text.isNotEmpty) {
-          stopListeningAndProcess(text);
+          stopListeningAndProcess(text, reqId);
         } else {
           state = state.copyWith(
             isListening: false,
             petMode: 'idle',
             statusNote: 'Nothing heard. Tap the mic and try again.',
+            conversationStatus: ConversationStatus.idle,
           );
         }
       } else if (ev == 'error') {
@@ -495,6 +531,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
           isListening: false,
           petMode: 'idle',
           statusNote: 'Nothing heard. Tap the mic and try again.',
+          conversationStatus: ConversationStatus.error,
         );
       }
     });
@@ -545,9 +582,15 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
   }
 
   /// Stop microphone recording and process STT -> Groq AI -> Timbre TTS pipeline
-  Future<void> stopListeningAndProcess([String? directText]) async {
+  Future<void> stopListeningAndProcess([String? directText, int? requestId]) async {
     _previewDebounceTimer?.cancel();
     _liveSpeechSub?.cancel();
+
+    final reqId = requestId ?? _activeRequestId;
+    if (reqId != _activeRequestId) {
+      debugPrint('[STALE_DISCARD] Discarding stopListeningAndProcess for req #$reqId (active: #$_activeRequestId)');
+      return;
+    }
 
     String? recognizedText = directText;
     if (recognizedText == null || recognizedText.isEmpty) {
@@ -555,10 +598,16 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
         isListening: false,
         petMode: 'think',
         statusNote: 'Transcribing with Gnani Prisma v3.0…',
+        conversationStatus: ConversationStatus.processing,
       );
       recognizedText = await SpeechService.instance.stopLiveRecognition();
     } else {
       await SpeechService.instance.cancelLiveRecognition();
+    }
+
+    if (reqId != _activeRequestId) {
+      debugPrint('[STALE_DISCARD] Discarding STT result for req #$reqId (active: #$_activeRequestId)');
+      return;
     }
 
     if (recognizedText == null || recognizedText.trim().isEmpty) {
@@ -566,6 +615,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
         isListening: false,
         petMode: 'idle',
         statusNote: 'Nothing heard. Tap the mic and try again.',
+        conversationStatus: ConversationStatus.idle,
       );
       return;
     }
@@ -576,24 +626,30 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
       isListening: false,
       petMode: 'think',
       statusNote: 'Translating…',
+      conversationStatus: ConversationStatus.processing,
     );
 
-    await _processWithGroqAITutor(trimmed);
+    await _processWithGroqAITutor(trimmed, reqId);
   }
 
   /// Submit typed sentence (Text-only mode)
   Future<void> submitTypedText(String text) async {
     if (text.trim().isEmpty) return;
+    final reqId = ++_activeRequestId;
     state = state.copyWith(
       spokenText: text.trim(),
       petMode: 'think',
       statusNote: 'Reasoning with Groq GPT-OSS 120B…',
+      conversationStatus: ConversationStatus.processing,
+      activeRequestId: reqId,
     );
-    await _processWithGroqAITutor(text.trim());
+    await _processWithGroqAITutor(text.trim(), reqId);
   }
 
   /// Central Groq AI tutor reasoning pipeline
-  Future<void> _processWithGroqAITutor(String input) async {
+  Future<void> _processWithGroqAITutor(String input, int reqId) async {
+    final tReq = DateTime.now().millisecondsSinceEpoch;
+    debugPrint('[TRANSLATION_REQUEST] timestamp=${DateTime.now().toIso8601String()} reqId=#$reqId text="$input" targetLang=${state.targetLanguage.bcp47}');
     // 1. Call Groq AI Tutor
     final aiResult = await SpeechService.instance.askAITutor(
       userMessage: input,
@@ -603,6 +659,11 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
       history: state.conversationHistory,
       mode: 'tutor',
     );
+
+    if (reqId != _activeRequestId) {
+      debugPrint('[STALE_DISCARD] Discarding Groq AI response for req #$reqId (active is #$_activeRequestId)');
+      return;
+    }
 
     String translated = input;
     String? replyText;
@@ -628,6 +689,10 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
         targetLang: state.targetLanguage.bcp47,
         characterId: state.activePet.key,
       );
+      if (reqId != _activeRequestId) {
+        debugPrint('[STALE_DISCARD] Discarding fallback translation for old req #$reqId (active: #$_activeRequestId)');
+        return;
+      }
       translated = (fallbackTrans?['translated_text'] as String?)?.trim() ?? input;
       providerName = 'local_fallback';
     }
@@ -646,30 +711,21 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     }
     final boundedHistory = updatedHistory.length > 8 ? updatedHistory.sublist(updatedHistory.length - 8) : updatedHistory;
 
+    debugPrint('[TRANSLATION_RESPONSE] timestamp=${DateTime.now().toIso8601String()} reqId=#$reqId elapsed=${DateTime.now().millisecondsSinceEpoch - tReq}ms translated="$translated"');
     state = state.copyWith(
-
       translatedText: translated,
-
       aiReplyText: replyText,
-
       correction: correction,
-
       explanation: explanation,
-
       examples: examples,
-
       pronunciationGuide: pronunciationGuide,
-
       words: wordList,
-
       aiProvider: providerName,
-
       conversationHistory: boundedHistory,
-
       statusNote: 'Synthesizing voice via Gnani Timbre TTS…',
-
       petMode: 'think',
-
+      conversationStatus: ConversationStatus.translated,
+      activeRequestId: reqId,
     );
 
 
@@ -1129,6 +1185,7 @@ class CompanionNotifier extends StateNotifier<CompanionState> {
     _karaokeTimer?.cancel();
     _previewDebounceTimer?.cancel();
     _liveSpeechSub?.cancel();
+    _playbackSub?.cancel();
     SpeechService.instance.stopPlayback();
     SpeechService.instance.cancelLiveRecognition();
     super.dispose();

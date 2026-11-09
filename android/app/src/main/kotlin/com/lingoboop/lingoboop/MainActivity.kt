@@ -122,6 +122,7 @@ class MainActivity : FlutterActivity() {
                     val targetLang = call.argument<String>("targetLang") ?: "en-US"
                     val voice = call.argument<String>("voice") ?: "Shivani"
                     val authToken = call.argument<String>("authToken")
+                    val backendUrl = call.argument<String>("backendUrl") ?: "https://lingoboop-ai.onrender.com"
 
                     val intent = Intent(this, FloatingPetService::class.java).apply {
                         action = FloatingPetService.ACTION_START
@@ -131,6 +132,7 @@ class MainActivity : FlutterActivity() {
                         putExtra(FloatingPetService.EXTRA_SOURCE_LANG, sourceLang)
                         putExtra(FloatingPetService.EXTRA_TARGET_LANG, targetLang)
                         putExtra(FloatingPetService.EXTRA_VOICE, voice)
+                        putExtra("backend_url", backendUrl)
                         if (authToken != null) {
                             putExtra(FloatingPetService.EXTRA_AUTH_TOKEN, authToken)
                         }
@@ -214,7 +216,7 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "updateBackendUrl" -> {
-                    val backendUrl = call.argument<String>("backendUrl") ?: "http://127.0.0.1:8000"
+                    val backendUrl = call.argument<String>("backendUrl") ?: "https://lingoboop-ai.onrender.com"
                     val intent = Intent(this, FloatingPetService::class.java).apply {
                         action = FloatingPetService.ACTION_UPDATE_BACKEND_URL
                         putExtra("backend_url", backendUrl)
@@ -336,6 +338,9 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun startSpeechListening(language: String) {
+        // Prevent concurrent microphone access between in-app and overlay
+        FloatingPetService.stopOverlayAudioCapture()
+
         val recorder = VoiceActivityRecorder.getInstance(this)
         recorder.startRecording(object : VoiceActivityRecorder.VadListener {
             override fun onRecordingStarted(startTimeMs: Long) {

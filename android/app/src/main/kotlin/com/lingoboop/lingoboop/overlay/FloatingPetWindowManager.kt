@@ -152,7 +152,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
 
     }
     private var authToken: String? = null
-    private var backendBaseUrl: String = "http://127.0.0.1:8000"
+    private var backendBaseUrl: String = "https://lingoboop-ai.onrender.com"
     private var savedPetXBeforePanel: Int? = null
 
     // Authoritative Card State
@@ -258,7 +258,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
         targetLanguageName = prefs.getString("target_lang_name", getLanguageName(targetLanguage)) ?: getLanguageName(targetLanguage)
         selectedVoice = prefs.getString("selected_tts_voice", "Devansh") ?: "Devansh"
         authToken = prefs.getString("auth_token", null)
-        backendBaseUrl = prefs.getString("backend_base_url", "http://127.0.0.1:8000") ?: "http://127.0.0.1:8000"
+        backendBaseUrl = prefs.getString("backend_base_url", "https://lingoboop-ai.onrender.com") ?: "https://lingoboop-ai.onrender.com"
 
         spokenText = prefs.getString("saved_spoken_text", "") ?: ""
         translatedText = prefs.getString("saved_translated_text", "") ?: ""
@@ -408,7 +408,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
         Handler(Looper.getMainLooper()).post {
             updatePanelTheme()
             tvSpoken?.text = this.spokenText.ifEmpty { "Tap mic to speak or enter text below." }
-            tvTranslated?.text = this.translatedText.ifEmpty { "Welcome to LingoBoop!" }
+            tvTranslated?.text = this.translatedText.ifEmpty { "Welcome to TalkTails!" }
             if (this.correctionTip != null && this.correctionTip != "null") {
                 tvCorrection?.visibility = View.VISIBLE
                 tvCorrection?.text = "💡 ${this.correctionTip}"
@@ -982,7 +982,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
 
         // 3. Translated Karaoke View (bold prominent)
         val translated = TextView(context).apply {
-            text = translatedText.ifEmpty { "Welcome to LingoBoop!" }
+            text = translatedText.ifEmpty { "Welcome to TalkTails!" }
             setTextColor(Color.WHITE)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 19f)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -1373,7 +1373,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
     private fun speakCurrentTranslation(rate: Float) {
         val phrase = translatedText.ifEmpty { tvTranslated?.text?.toString() ?: "" }
         if (phrase.isEmpty() || phrase.contains("unavailable", ignoreCase = true) ||
-            phrase == "Translating…" || phrase == "Welcome to LingoBoop!"
+            phrase == "Translating…" || phrase == "Welcome to TalkTails!"
         ) {
             return
         }
@@ -2033,7 +2033,7 @@ class FloatingPetWindowManager(private val context: Context) : TextToSpeech.OnIn
         } catch (_: Exception) {}
     }
 
-    private fun stopVoiceRecognition(releaseRecord: Boolean = false) {
+    fun stopVoiceRecognition(releaseRecord: Boolean = false) {
         isListening = false
         isRecordingAudio = false
         try {

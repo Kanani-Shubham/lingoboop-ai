@@ -4,9 +4,17 @@
 class AppConfig {
   AppConfig._();
 
-  static const String appName = 'LingoBoom';
+  static const String appName = 'TalkTails';
+  static const String backendProductionUrl = 'https://lingoboop-ai.onrender.com';
   static const String backendEmulatorUrl = 'http://10.0.2.2:8000';
   static const String backendDeviceUrl = 'http://127.0.0.1:8000';
+
+  /// Default backend base URL: uses BACKEND_URL dart-define if provided,
+  /// otherwise defaults to the production Render URL.
+  static const String defaultBackendUrl = String.fromEnvironment(
+    'BACKEND_URL',
+    defaultValue: backendProductionUrl,
+  );
 
   static const String supabaseUrl = String.fromEnvironment(
     'SUPABASE_URL',

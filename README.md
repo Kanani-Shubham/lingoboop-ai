@@ -1,4 +1,4 @@
-# LingoBoom
+# TalkTails
 
 **Tagline:** Your on-screen AI pet for real-time speech and language learning.  
 **First Target Platform:** Android Mobile (Android 8.0+ / API 26+)  

@@ -351,6 +351,138 @@ class UserDataService {
     }
   }
 
+  /// Record structured daily practice attempt into daily_practice_attempts table
+  Future<void> recordPracticeAttempt({
+    required String targetText,
+    required String nativeTranslation,
+    required String userSpoken,
+    required double score,
+    required bool isPassed,
+    required int sequenceNumber,
+    required String nativeLang,
+    required String targetLang,
+  }) async {
+    final uid = currentUserId;
+    final client = _client;
+    if (client == null || uid == null) return;
+
+    try {
+      final now = DateTime.now();
+      final dateStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+
+      // 1. Get or create daily practice session for today
+      final sessionRes = await client
+          .from('daily_practice_sessions')
+          .select('id')
+          .eq('user_id', uid)
+          .eq('session_date', dateStr)
+          .eq('native_language_code', nativeLang)
+          .eq('target_language_code', targetLang)
+          .maybeSingle();
+
+      String sessionId;
+      if (sessionRes != null && sessionRes['id'] != null) {
+        sessionId = sessionRes['id'] as String;
+      } else {
+        final newSession = await client
+            .from('daily_practice_sessions')
+            .insert({
+              'user_id': uid,
+              'session_date': dateStr,
+              'native_language_code': nativeLang,
+              'target_language_code': targetLang,
+              'status': 'in_progress',
+              'total_sentences': 14,
+              'completed_sentences': 0,
+            })
+            .select('id')
+            .single();
+        sessionId = newSession['id'] as String;
+      }
+
+      // 2. Get or create practice item
+      final itemRes = await client
+          .from('daily_practice_items')
+          .select('id, attempt_count')
+          .eq('session_id', sessionId)
+          .eq('sequence_number', sequenceNumber)
+          .maybeSingle();
+
+      String itemId;
+      int nextAttemptNumber = 1;
+      if (itemRes != null && itemRes['id'] != null) {
+        itemId = itemRes['id'] as String;
+        final currentAttempts = (itemRes['attempt_count'] as num?)?.toInt() ?? 0;
+        nextAttemptNumber = currentAttempts + 1;
+        await client.from('daily_practice_items').update({
+          'attempt_count': nextAttemptNumber,
+          'status': isPassed ? 'passed' : 'attempted',
+          'best_pronunciation_score': score,
+          if (isPassed) 'passed_at': now.toIso8601String(),
+        }).eq('id', itemId);
+      } else {
+        final newItem = await client
+            .from('daily_practice_items')
+            .insert({
+              'session_id': sessionId,
+              'user_id': uid,
+              'sequence_number': sequenceNumber,
+              'target_text': targetText,
+              'native_translation': nativeTranslation,
+              'status': isPassed ? 'passed' : 'attempted',
+              'best_pronunciation_score': score,
+              'attempt_count': 1,
+              'first_attempted_at': now.toIso8601String(),
+              if (isPassed) 'passed_at': now.toIso8601String(),
+            })
+            .select('id')
+            .single();
+        itemId = newItem['id'] as String;
+      }
+
+      // 3. Record individual attempt
+      await client.from('daily_practice_attempts').insert({
+        'item_id': itemId,
+        'session_id': sessionId,
+        'user_id': uid,
+        'attempt_number': nextAttemptNumber,
+        'recognized_transcript': userSpoken,
+        'expected_target': targetText,
+        'pronunciation_score': score,
+        'is_passed': isPassed,
+        'created_at': now.toIso8601String(),
+      });
+    } catch (e) {
+      debugPrint('[UserDataService] Practice attempt record note: $e');
+    }
+  }
+
+  /// Mark daily practice session completed
+  Future<void> updateDailyPracticeSessionCompletion({
+    required int totalSentences,
+    required int completedCount,
+    required double averageScore,
+    required String nativeLang,
+    required String targetLang,
+  }) async {
+    final uid = currentUserId;
+    final client = _client;
+    if (client == null || uid == null) return;
+
+    try {
+      final now = DateTime.now();
+      final dateStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      await client.from('daily_practice_sessions').update({
+        'completed_sentences': completedCount,
+        'status': completedCount >= totalSentences ? 'completed' : 'in_progress',
+        'average_pronunciation_score': averageScore,
+        'completed_at': completedCount >= totalSentences ? now.toIso8601String() : null,
+      }).eq('user_id', uid).eq('session_date', dateStr).eq('native_language_code', nativeLang).eq('target_language_code', targetLang);
+    } catch (e) {
+      debugPrint('[UserDataService] Session completion update note: $e');
+    }
+  }
+
   /// Fetch learning progress (spaced repetition)
   Future<List<Map<String, dynamic>>> getLearningProgress() async {
     final uid = currentUserId;

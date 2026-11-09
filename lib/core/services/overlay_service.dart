@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'auth_service.dart';
+import 'speech_service.dart';
 
 class OverlayService {
   OverlayService._();
@@ -45,10 +46,12 @@ class OverlayService {
     required String targetLang,
     String? voice,
     String? authToken,
+    String? backendUrl,
   }) async {
     if (!Platform.isAndroid) return false;
     try {
       final token = authToken ?? AuthService.instance.currentAccessToken;
+      final currentBackendUrl = backendUrl ?? SpeechService.instance.backendUrl;
       final res = await _channel.invokeMethod<bool>('startOverlay', {
         'petKey': petKey,
         'petName': petName,
@@ -57,6 +60,7 @@ class OverlayService {
         'targetLang': targetLang,
         'voice': voice ?? 'Shivani',
         'authToken': ?token,
+        'backendUrl': currentBackendUrl,
       });
       return res ?? false;
     } catch (e) {

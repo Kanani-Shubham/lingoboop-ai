@@ -38,9 +38,24 @@ class _DailySpeakingPracticeScreenState
     _loadDailySentences();
   }
 
-  String get _todayCacheKey {
+  String _cacheKey(String src, String tgt) {
     final now = DateTime.now();
-    return 'daily_practice_${now.year}_${now.month}_${now.day}';
+    return 'daily_practice_${now.year}_${now.month}_${now.day}_${src}_$tgt';
+  }
+
+  Future<void> _saveSessionProgress() async {
+    final companionState = ref.read(companionProvider);
+    try {
+      final docDir = await getApplicationDocumentsDirectory();
+      final cacheFile = File('${docDir.path}/${_cacheKey(companionState.sourceLanguage.bcp47, companionState.targetLanguage.bcp47)}.json');
+      final payload = {
+        'sentences': _sentences,
+        'currentIndex': _currentIndex,
+        'scores': _scores.map((k, v) => MapEntry(k.toString(), v)),
+        'reviewIndices': _reviewIndices.toList(),
+      };
+      await cacheFile.writeAsString(jsonEncode(payload));
+    } catch (_) {}
   }
 
   Future<void> _loadDailySentences() async {
@@ -49,13 +64,30 @@ class _DailySpeakingPracticeScreenState
 
     try {
       final docDir = await getApplicationDocumentsDirectory();
-      final cacheFile = File('${docDir.path}/$_todayCacheKey.json');
+      final cacheFile = File('${docDir.path}/${_cacheKey(companionState.sourceLanguage.bcp47, companionState.targetLanguage.bcp47)}.json');
 
       if (await cacheFile.exists()) {
         final cachedJson = await cacheFile.readAsString();
         if (cachedJson.isNotEmpty) {
-          final decoded = jsonDecode(cachedJson) as List<dynamic>;
-          if (decoded.isNotEmpty) {
+          final decoded = jsonDecode(cachedJson);
+          if (decoded is Map<String, dynamic> && decoded['sentences'] != null) {
+            final list = decoded['sentences'] as List<dynamic>;
+            final savedIndex = (decoded['currentIndex'] as num?)?.toInt() ?? 0;
+            final savedScoresRaw = decoded['scores'] as Map<String, dynamic>? ?? {};
+            final savedScores = <int, int>{};
+            savedScoresRaw.forEach((k, v) {
+              final ik = int.tryParse(k);
+              if (ik != null && v is num) savedScores[ik] = v.toInt();
+            });
+
+            setState(() {
+              _sentences = list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+              _currentIndex = savedIndex < _sentences.length ? savedIndex : 0;
+              _scores.addAll(savedScores);
+              _isLoading = false;
+            });
+            return;
+          } else if (decoded is List<dynamic> && decoded.isNotEmpty) {
             setState(() {
               _sentences = decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
               _isLoading = false;
@@ -65,15 +97,21 @@ class _DailySpeakingPracticeScreenState
         }
       }
 
-      // Fetch from backend
+      // Fetch from backend (14 sentences default as specified)
       final fetched = await SpeechService.instance.fetchDailyPractice(
         nativeLang: companionState.sourceLanguage.bcp47,
         targetLang: companionState.targetLanguage.bcp47,
-        count: 20,
+        count: 14,
       );
 
       if (fetched.isNotEmpty) {
-        await cacheFile.writeAsString(jsonEncode(fetched));
+        final payload = {
+          'sentences': fetched,
+          'currentIndex': 0,
+          'scores': {},
+          'reviewIndices': [],
+        };
+        await cacheFile.writeAsString(jsonEncode(payload));
       }
 
       if (mounted) {
@@ -160,18 +198,21 @@ class _DailySpeakingPracticeScreenState
           }
         });
 
-        // Record progress in database
+        // Record structured practice progress (NOT normal conversation messages)
         if (scoring.hasSpoken) {
           final companionState = ref.read(companionProvider);
-          UserDataService.instance.recordConversationMessage(
-            characterId: companionState.activePet.key,
-            sourceLanguage: companionState.sourceLanguage.bcp47,
-            targetLanguage: companionState.targetLanguage.bcp47,
-            sourceText: item?['native_translation']?.toString() ?? '',
-            translatedText: expected,
-            pronunciationScore: scoring.matchPercentage.toDouble(),
+          UserDataService.instance.recordPracticeAttempt(
+            targetText: expected,
+            nativeTranslation: item?['native_translation']?.toString() ?? '',
+            userSpoken: userSpoken,
+            score: scoring.matchPercentage.toDouble(),
+            isPassed: scoring.matchPercentage >= 70,
+            sequenceNumber: _currentIndex + 1,
+            nativeLang: companionState.sourceLanguage.bcp47,
+            targetLang: companionState.targetLanguage.bcp47,
           );
         }
+        _saveSessionProgress();
       }
     } else {
       // Start recording
@@ -193,6 +234,7 @@ class _DailySpeakingPracticeScreenState
         _scoringResult = null;
         _userSpokenText = null;
       });
+      _saveSessionProgress();
     } else {
       _showCompletionDialog();
     }
@@ -205,6 +247,7 @@ class _DailySpeakingPracticeScreenState
         _scoringResult = null;
         _userSpokenText = null;
       });
+      _saveSessionProgress();
     }
   }
 
@@ -216,14 +259,28 @@ class _DailySpeakingPracticeScreenState
         _reviewIndices.add(_currentIndex);
       }
     });
+    _saveSessionProgress();
   }
 
   void _showCompletionDialog() {
+    final companionState = ref.read(companionProvider);
     final total = _sentences.length;
     final attempted = _scores.length;
     final avgScore = attempted > 0
         ? (_scores.values.reduce((a, b) => a + b) / attempted).round()
         : 0;
+
+    // 1. Explicitly clear active practice prompt so pet card returns to clean idle state
+    ref.read(companionProvider.notifier).clearActivePracticePrompt();
+
+    // 2. Persist real session completion metrics
+    UserDataService.instance.updateDailyPracticeSessionCompletion(
+      totalSentences: total,
+      completedCount: attempted,
+      averageScore: avgScore.toDouble(),
+      nativeLang: companionState.sourceLanguage.bcp47,
+      targetLang: companionState.targetLanguage.bcp47,
+    );
 
     showDialog(
       context: context,

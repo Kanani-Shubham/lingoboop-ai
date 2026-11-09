@@ -10,6 +10,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
+import '../config/app_config.dart';
 import 'auth_service.dart';
 
 class SpeechService {
@@ -23,7 +24,7 @@ class SpeechService {
   AudioRecorder get recorder => _recorder ??= AudioRecorder();
   AudioPlayer get player => _player ??= AudioPlayer();
 
-  String _backendBaseUrl = 'http://127.0.0.1:8000';
+  String _backendBaseUrl = AppConfig.defaultBackendUrl;
   bool _isRecording = false;
   String? _currentRecordingPath;
 
@@ -31,6 +32,12 @@ class SpeechService {
 
   final StreamController<Map<String, dynamic>> _unifiedSpeechEventsController =
       StreamController<Map<String, dynamic>>.broadcast();
+  final StreamController<bool> _playbackStateController = StreamController<bool>.broadcast();
+  StreamSubscription? _playerStateSubscription;
+  bool _isAudioSessionConfigured = false;
+
+  /// Stream of audio playback state (true = actively playing speech, false = completed/idle)
+  Stream<bool> get playbackActiveStream => _playbackStateController.stream;
 
   Timer? _silenceTimer;
   Timer? _maxRecordingTimer;
@@ -38,6 +45,7 @@ class SpeechService {
   static const MethodChannel _nativeSpeechChannel = MethodChannel('com.lingoboop.app/speech');
   static const EventChannel _nativeSpeechEventChannel = EventChannel('com.lingoboop.app/speech_events');
   StreamSubscription? _nativeSpeechEventsSub;
+  bool _usingNativeVad = false;
   bool _hasDetectedSpeech = false;
   String _activeLanguageCode = 'gu-IN';
 
@@ -90,7 +98,9 @@ class SpeechService {
 
       if (useNativeVad) {
         try {
+          _usingNativeVad = true;
           _isRecording = true;
+          debugPrint('[MIC_START] timestamp=${DateTime.now().toIso8601String()} engine=native_vad lang=$languageCode');
           _unifiedSpeechEventsController.add({'event': 'ready'});
           _unifiedSpeechEventsController.add({'event': 'listening', 'language': languageCode});
 
@@ -104,6 +114,7 @@ class SpeechService {
               _unifiedSpeechEventsController.add({'event': 'listening', 'language': languageCode});
             } else if (ev == 'speech_detected') {
               _hasDetectedSpeech = true;
+              debugPrint('[SPEECH_DETECTED] timestamp=${DateTime.now().toIso8601String()} dbfs=${event['dbfs']} rms=${event['rms']}');
               _unifiedSpeechEventsController.add({
                 'event': 'speech_detected',
                 'rms': event['rms'],
@@ -112,6 +123,7 @@ class SpeechService {
             } else if (ev == 'rms') {
               _unifiedSpeechEventsController.add({'event': 'rms', 'rms': event['rms']});
             } else if (ev == 'silence_detected') {
+              debugPrint('[SPEECH_END_DETECTED] timestamp=${DateTime.now().toIso8601String()} duration=${event['silence_duration']}ms');
               _unifiedSpeechEventsController.add({
                 'event': 'silence_detected',
                 'duration': event['silence_duration'],
@@ -119,6 +131,7 @@ class SpeechService {
             } else if (ev == 'recording_complete') {
               _isRecording = false;
               final wavPath = event['path'] as String?;
+              debugPrint('[RECORDING_FINALIZED] timestamp=${DateTime.now().toIso8601String()} path=$wavPath');
               _unifiedSpeechEventsController.add({'event': 'processing'});
               _unifiedSpeechEventsController.add({'event': 'transcribing'});
 
@@ -156,6 +169,7 @@ class SpeechService {
       }
 
       // 2. Fallback path (Desktop / Test runner / Web)
+      _usingNativeVad = false;
       final ok = await startRecording();
       if (!ok) {
         _unifiedSpeechEventsController.add({'event': 'error', 'message': 'Failed to start microphone recording'});
@@ -245,10 +259,13 @@ class SpeechService {
     await _amplitudeSub?.cancel();
     _amplitudeSub = null;
 
-    if (!kIsWeb && Platform.isAndroid) {
+    if (!kIsWeb && Platform.isAndroid && _usingNativeVad) {
       try {
         await _nativeSpeechChannel.invokeMethod('stopListening');
       } catch (_) {}
+      // Native VAD recorder triggers 'recording_complete' -> transcribeAudio on rec_vad_*.wav.
+      // Do NOT touch Dart recorder or fire duplicate STT request!
+      return null;
     }
 
     if (!_isRecording) return null;
@@ -297,6 +314,11 @@ class SpeechService {
       } catch (_) {}
     }
 
+    if (_usingNativeVad) {
+      _isRecording = false;
+      return;
+    }
+
     if (_isRecording) {
       final path = await stopRecording();
       if (path != null) {
@@ -326,18 +348,34 @@ class SpeechService {
 
   String get backendUrl => _backendBaseUrl;
 
-  /// Helper to test and pick the responsive backend URL (adb reverse 127.0.0.1 vs emulator 10.0.2.2)
+  /// Helper to test and pick the responsive backend URL (adb reverse 127.0.0.1 vs emulator 10.0.2.2 vs production Render)
   Future<String> resolveBackendUrl() async {
-    const candidates = [
-      'http://127.0.0.1:8000',
+    // In production/release builds, lock directly to the production Render URL
+    if (kReleaseMode) {
+      _backendBaseUrl = AppConfig.backendProductionUrl;
+      return _backendBaseUrl;
+    }
+
+    // If an explicit override was passed via --dart-define=BACKEND_URL, prefer it
+    const envUrl = String.fromEnvironment('BACKEND_URL');
+    if (envUrl.isNotEmpty) {
+      _backendBaseUrl = envUrl.replaceAll(RegExp(r'/+$'), '');
+      return _backendBaseUrl;
+    }
+
+    // In local development / debug builds, probe local dev endpoints first.
+    // If none are responsive, fall back to production backend URL on Render.
+    final candidates = [
+      AppConfig.backendDeviceUrl,
       'http://10.82.30.80:8000',
       'http://10.94.94.80:8000',
-      'http://10.0.2.2:8000',
+      AppConfig.backendEmulatorUrl,
+      AppConfig.backendProductionUrl,
     ];
 
     for (final base in candidates) {
       try {
-        final res = await http.get(Uri.parse('$base/api/v1/health')).timeout(const Duration(milliseconds: 500));
+        final res = await http.get(Uri.parse('$base/api/v1/health')).timeout(const Duration(milliseconds: 600));
         if (res.statusCode == 200) {
           _backendBaseUrl = base;
           return base;
@@ -435,6 +473,7 @@ class SpeechService {
           return null;
         }
 
+        debugPrint('[STT_REQUEST] timestamp=${DateTime.now().toIso8601String()} path=$audioPath lang=$languageCode');
         final url = Uri.parse('$_backendBaseUrl/api/v1/stt/transcribe');
         final request = http.MultipartRequest('POST', url);
 
@@ -462,7 +501,7 @@ class SpeechService {
           final decoded = jsonDecode(responseBody) as Map<String, dynamic>;
           if (decoded['success'] == true && decoded['data'] != null) {
             final transcript = (decoded['data']['transcript'] as String?)?.trim();
-            debugPrint('[SpeechService] STT Success ($elapsedMs ms, $bytes bytes, lang=$languageCode): "$transcript"');
+            debugPrint('[STT_RESPONSE] timestamp=${DateTime.now().toIso8601String()} elapsed=${elapsedMs}ms transcript="$transcript"');
             return transcript;
           }
         } else {
@@ -594,7 +633,8 @@ class SpeechService {
     String languageCode = 'en-IN',
     double speed = 1.0,
   }) async {
-    debugPrint('[SpeechService] TTS request started: text="$text", voice=$voice, lang=$languageCode, speed=$speed');
+    final startMs = DateTime.now().millisecondsSinceEpoch;
+    debugPrint('[TTS_REQUEST] timestamp=${DateTime.now().toIso8601String()} text="$text" voice=$voice lang=$languageCode speed=$speed');
     try {
       final url = Uri.parse('$_backendBaseUrl/api/v1/tts/synthesize');
       final resp = await http
@@ -624,7 +664,7 @@ class SpeechService {
             final filePath = '${tempDir.path}/lingo_tts_${DateTime.now().millisecondsSinceEpoch}.wav';
             final ttsFile = File(filePath);
             await ttsFile.writeAsBytes(paddedBytes);
-            debugPrint('[SpeechService] Audio file successfully written: $filePath (${paddedBytes.length} bytes)');
+            debugPrint('[TTS_RESPONSE] timestamp=${DateTime.now().toIso8601String()} elapsed=${DateTime.now().millisecondsSinceEpoch - startMs}ms path=$filePath');
             return filePath;
           }
         }
@@ -956,48 +996,57 @@ class SpeechService {
     }
 
     try {
-      debugPrint('[SpeechService] Audio player initialization starting...');
-      final session = await AudioSession.instance;
-      await session.configure(const AudioSessionConfiguration(
-        avAudioSessionCategory: AVAudioSessionCategory.playback,
-        avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.duckOthers,
-        avAudioSessionMode: AVAudioSessionMode.spokenAudio,
-        avAudioSessionRouteSharingPolicy:
-            AVAudioSessionRouteSharingPolicy.defaultPolicy,
-        avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
-        androidAudioAttributes: AndroidAudioAttributes(
-          contentType: AndroidAudioContentType.speech,
-          flags: AndroidAudioFlags.none,
-          usage: AndroidAudioUsage.media,
-        ),
-        androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
-        androidWillPauseWhenDucked: true,
-      ));
-      await session.setActive(true);
-      debugPrint('[SpeechService] AudioSession activated for speech playback');
+      if (!_isAudioSessionConfigured) {
+        try {
+          final session = await AudioSession.instance;
+          await session.configure(const AudioSessionConfiguration(
+            avAudioSessionCategory: AVAudioSessionCategory.playback,
+            avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.duckOthers,
+            avAudioSessionMode: AVAudioSessionMode.spokenAudio,
+            avAudioSessionRouteSharingPolicy:
+                AVAudioSessionRouteSharingPolicy.defaultPolicy,
+            avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
+            androidAudioAttributes: AndroidAudioAttributes(
+              contentType: AndroidAudioContentType.speech,
+              flags: AndroidAudioFlags.none,
+              usage: AndroidAudioUsage.media,
+            ),
+            androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+            androidWillPauseWhenDucked: true,
+          ));
+          await session.setActive(true);
+          _isAudioSessionConfigured = true;
+          debugPrint('[SpeechService] AudioSession activated for speech playback');
+        } catch (_) {}
+      }
 
       if (player.playing) {
-        debugPrint('[SpeechService] Stopping previous playback');
         await player.stop();
       }
 
       await player.setFilePath(filePath);
       await player.setVolume(1.0);
       await player.setSpeed(speed);
-      debugPrint('[SpeechService] Audio playback started: speed=$speed, volume=1.0');
+      debugPrint('[AUDIO_PLAYBACK_START] timestamp=${DateTime.now().toIso8601String()} path=$filePath speed=$speed');
+      _playbackStateController.add(true);
 
-      StreamSubscription? stateSub;
-      stateSub = player.playerStateStream.listen((state) {
-        debugPrint('[SpeechService] Audio playback state changed: playing=${state.playing}, processingState=${state.processingState}');
-        if (state.processingState == ProcessingState.completed) {
-          debugPrint('[SpeechService] Playback completed successfully');
-          stateSub?.cancel();
+      await _playerStateSubscription?.cancel();
+      _playerStateSubscription = player.playerStateStream.listen((state) {
+        if (state.processingState == ProcessingState.completed ||
+            (!state.playing &&
+             state.processingState != ProcessingState.loading &&
+             state.processingState != ProcessingState.buffering)) {
+          debugPrint('[AUDIO_PLAYBACK_END] timestamp=${DateTime.now().toIso8601String()}');
+          _playbackStateController.add(false);
+          _playerStateSubscription?.cancel();
+          _playerStateSubscription = null;
         }
       });
 
       await player.play();
     } catch (e) {
       debugPrint('[SpeechService] Playback errors: $e');
+      _playbackStateController.add(false);
     }
   }
 
@@ -1044,58 +1093,85 @@ class SpeechService {
   }
 
   List<Map<String, dynamic>> _offlineDailyPracticeSet(String tgt, String src) {
-    return [
+    final tgtCode = tgt.toLowerCase().split('-')[0];
+    final srcCode = src.toLowerCase().split('-')[0];
+
+    final phrases = [
       {
-        'id': 'offline_1',
-        'target_sentence': 'Where is the nearest bus station?',
-        'native_translation': 'નજીકનું બસ સ્ટેશન ક્યાં છે?',
-        'category': 'Travel',
-        'difficulty': 'Easy',
-        'pronunciation_guide': 'wair iz thuh neer-ist bus stay-shun',
-        'context_tip': 'Useful for finding local transit.'
+        'cat': 'Asking Directions',
+        'trans': {
+          'en': 'Where is the nearest railway station?',
+          'gu': 'નજીકનું રેલવે સ્ટેશન ક્યાં છે?',
+          'bn': 'কাছের রেলওয়ে স্টেশনটি কোথায়?',
+          'hi': 'निकटतम रेलवे स्टेशन कहाँ है?',
+        },
+        'guide': 'Where iz the neer-est rayl-way stay-shun?',
       },
       {
-        'id': 'offline_2',
-        'target_sentence': 'Could you please help me with these bags?',
-        'native_translation': 'શું તમે કૃપા કરીને આ બેગમાં મારી મદદ કરી શકશો?',
-        'category': 'Daily',
-        'difficulty': 'Easy',
-        'pronunciation_guide': 'kood yoo pleez help mee with theez bagz',
-        'context_tip': 'Polite request.'
+        'cat': 'Ordering Food',
+        'trans': {
+          'en': 'Please give me two cups of hot tea.',
+          'gu': 'કૃપા કરીને મને બે કપ ગરમ ચા આપો.',
+          'bn': 'দয়া করে আমাকে দুই কাপ গরম চা দিন।',
+          'hi': 'कृपया मुझे दो कप गर्म चाय दीजिए।',
+        },
+        'guide': 'Pleez giv mee too cups ov hot tee.',
       },
       {
-        'id': 'offline_3',
-        'target_sentence': 'I would like to order two coffees, please.',
-        'native_translation': 'હું કૃપા કરીને બે કોફી ઓર્ડર કરવા માંગુ છું.',
-        'category': 'Dining',
-        'difficulty': 'Easy',
-        'pronunciation_guide': 'eye wood lyk too or-der too kof-eez pleez',
-        'context_tip': 'Ordering at a cafe.'
+        'cat': 'Self-Introduction',
+        'trans': {
+          'en': 'Hello, I am learning this language.',
+          'gu': 'નમસ્તે, હું આ ભાષા શીખી રહ્યો છું.',
+          'bn': 'নমস্কার, আমি এই ভাষাটি শিখছি।',
+          'hi': 'नमस्ते, मैं यह भाषा सीख रहा हूँ।',
+        },
+        'guide': 'Hel-loh, eye am ler-ning this lang-gwij.',
       },
       {
-        'id': 'offline_4',
-        'target_sentence': 'What time does the morning flight depart?',
-        'native_translation': 'સવારની ફ્લાઇટ કેટલા વાગ્યે ઉપડે છે?',
-        'category': 'Travel',
-        'difficulty': 'Intermediate',
-        'pronunciation_guide': 'waht tyme duz thuh mor-ning flyte dee-part',
-        'context_tip': 'Airport queries.'
+        'cat': 'Shopping',
+        'trans': {
+          'en': 'How much does this item cost?',
+          'gu': 'આ કેટલાનું છે?',
+          'bn': 'এটার দাম কত?',
+          'hi': 'इसकी कीमत कितनी है?',
+        },
+        'guide': 'How much duz this eye-tem kost?',
       },
       {
-        'id': 'offline_5',
-        'target_sentence': 'My name is Shubham, and I am learning English.',
-        'native_translation': 'મારું નામ શુભમ છે, અને હું અંગ્રેજી શીખી રહ્યો છું.',
-        'category': 'Introduction',
-        'difficulty': 'Easy',
-        'pronunciation_guide': 'my naym iz shoo-bhum and eye am ler-ning ing-glish',
-        'context_tip': 'Self-introduction.'
+        'cat': 'Daily Conversation',
+        'trans': {
+          'en': 'Could you please speak a little slower?',
+          'gu': 'શું તમે થોડું ધીમે બોલી શકશો?',
+          'bn': 'আপনি কি একটু ধীরে কথা বলতে পারবেন?',
+          'hi': 'क्या आप थोड़ा धीरे बोल सकते हैं?',
+        },
+        'guide': 'Kood yoo pleez speek uh lit-ul sloh-er?',
       },
     ];
+
+    return phrases.asMap().entries.map((entry) {
+      final i = entry.key;
+      final p = entry.value;
+      final tMap = p['trans'] as Map<String, String>;
+      final targetText = tMap[tgtCode] ?? tMap['en'] ?? '';
+      final nativeText = tMap[srcCode] ?? tMap['gu'] ?? tMap['en'] ?? '';
+
+      return {
+        'id': 'offline_${i + 1}',
+        'target_sentence': targetText,
+        'native_translation': nativeText,
+        'category': p['cat'],
+        'difficulty': 'Easy',
+        'pronunciation_guide': tgtCode == 'en' ? p['guide'] : null,
+        'context_tip': 'Spoken practice for ${p['cat']}.',
+      };
+    }).toList();
   }
 
   /// Stop current playback
   Future<void> stopPlayback() async {
     try {
+      _playbackStateController.add(false);
       if (_player != null) {
         await _player!.stop();
       }

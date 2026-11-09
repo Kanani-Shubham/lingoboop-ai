@@ -223,7 +223,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> with WidgetsBin
                       ),
                     ),
                     subtitle: const Text(
-                      'Floats over other apps (WhatsApp, Chrome, YouTube). Stays available even after leaving LingoBoom.',
+                      'Floats over other apps (WhatsApp, Chrome, YouTube). Stays available even after leaving TalkTails.',
                       style: TextStyle(fontSize: 13, color: AppColors.textMuted, height: 1.3),
                     ),
                     value: _overlayRunning,

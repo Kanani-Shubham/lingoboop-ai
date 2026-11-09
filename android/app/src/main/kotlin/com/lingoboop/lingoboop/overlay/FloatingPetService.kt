@@ -38,11 +38,20 @@ class FloatingPetService : Service() {
         @Volatile
         var isRunning = false
             private set
+
+        @Volatile
+        var activeService: FloatingPetService? = null
+            private set
+
+        fun stopOverlayAudioCapture() {
+            activeService?.windowManager?.stopVoiceRecognition(releaseRecord = false)
+        }
     }
 
     override fun onCreate() {
         super.onCreate()
         isRunning = true
+        activeService = this
         createNotificationChannel()
         windowManager = FloatingPetWindowManager(this)
     }
@@ -83,7 +92,7 @@ class FloatingPetService : Service() {
                 windowManager?.updateVoice(voice)
             }
             ACTION_UPDATE_BACKEND_URL -> {
-                val url = intent?.getStringExtra("backend_url") ?: "http://127.0.0.1:8000"
+                val url = intent?.getStringExtra("backend_url") ?: "https://lingoboop-ai.onrender.com"
                 windowManager?.updateBackendUrl(url)
             }
             ACTION_UPDATE_CARD_STATE -> {
@@ -122,6 +131,10 @@ class FloatingPetService : Service() {
                 )
             }
             ACTION_START -> {
+                val backendUrl = intent?.getStringExtra("backend_url")
+                if (backendUrl != null) {
+                    windowManager?.updateBackendUrl(backendUrl)
+                }
                 val token = intent?.getStringExtra(EXTRA_AUTH_TOKEN)
                 if (token != null) {
                     windowManager?.updateAuthToken(token)
@@ -175,7 +188,7 @@ class FloatingPetService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val name = "LingoBoom Floating Buddy"
+            val name = "TalkTails Floating Buddy"
             val desc = "Keeps your floating companion active over other apps"
             val importance = NotificationManager.IMPORTANCE_LOW
             val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
@@ -209,7 +222,7 @@ class FloatingPetService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("LingoBoom Buddy is Active")
+            .setContentTitle("TalkTails Buddy is Active")
             .setContentText("Tap your floating buddy anywhere on screen to practice speech.")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -220,6 +233,9 @@ class FloatingPetService : Service() {
     }
 
     override fun onDestroy() {
+        if (activeService == this) {
+            activeService = null
+        }
         isRunning = false
         windowManager?.destroy()
         windowManager = null

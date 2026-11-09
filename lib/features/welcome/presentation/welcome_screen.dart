@@ -38,7 +38,7 @@ class WelcomeScreen extends StatelessWidget {
 
               // Title
               Text(
-                'LingoBoom',
+                'TalkTails',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.displayLarge?.copyWith(
                       fontSize: 38,
@@ -53,7 +53,7 @@ class WelcomeScreen extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16.0),
                 child: Text(
-                  'Your on-screen AI companion for real-time speech and language learning.',
+                  'AI Language Companion\nYour on-screen buddy for real-time speech and language practice.',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         fontSize: 16,

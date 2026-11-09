@@ -128,9 +128,13 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
 
   int get _nowMs => DateTime.now().millisecondsSinceEpoch;
 
-  /// Floor baseline calculation matching prototype floor() = Hh - 64 - 112
-  double _floor(double screenHeight, double bottomInset) =>
-      (screenHeight - 64.0 - bottomInset - 112.0).clamp(100.0, screenHeight - 160.0);
+  /// Floor baseline calculation matching prototype floor() = Hh - 64 - 112 (clamped safely)
+  double _floor(double screenHeight, double bottomInset) {
+    final maxF = screenHeight - 160.0;
+    const minF = 100.0;
+    if (maxF < minF) return minF;
+    return (screenHeight - 64.0 - bottomInset - 112.0).clamp(minF, maxF);
+  }
 
   void _onTick(Duration elapsed) {
     if (!mounted) return;
@@ -232,10 +236,24 @@ class _MainNavigationShellState extends ConsumerState<MainNavigationShell>
   }
 
   void _toggleCard(double screenWidth) {
-    setState(() => _hasTappedPet = true);
+    setState(() {
+      _hasTappedPet = true;
+      _isUserDragging = false;
+    });
     final isOpen = ref.read(companionProvider).isCardOpen;
     if (isOpen) {
-      _closeCard();
+      // Immediate responsive interaction: trigger animated reaction on tap while card is open
+      final notifier = ref.read(companionProvider.notifier);
+      final currentMode = ref.read(companionProvider).petMode;
+      if (currentMode != 'listen' && currentMode != 'talk') {
+        notifier.setPetMode('cheer');
+        _until = _nowMs + 1600;
+        Future.delayed(const Duration(milliseconds: 1600), () {
+          if (mounted && ref.read(companionProvider).isCardOpen) {
+            notifier.setPetMode('idle');
+          }
+        });
+      }
     } else {
       _openCard(screenWidth);
     }

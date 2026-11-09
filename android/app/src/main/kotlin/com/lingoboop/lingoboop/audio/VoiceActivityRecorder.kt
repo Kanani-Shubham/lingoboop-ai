@@ -57,11 +57,11 @@ class VoiceActivityRecorder private constructor(private val appContext: Context)
 
     private var audioRecord: AudioRecord? = null
 
-    // VAD Configuration thresholds
-    var silenceThresholdDbfs: Double = -46.0
-    var silenceTimeoutMs: Long = 1200L           // 1.2s silence after speech to auto-stop
-    var minSpeechDurationMs: Long = 300L         // 300ms minimum speech to prevent false clicks
-    var initialSpeechTimeoutMs: Long = 8000L     // 8s timeout if no speech detected at all
+    // VAD Configuration thresholds (Dynamic & Adaptive)
+    var silenceThresholdDbfs: Double = -42.0
+    var silenceTimeoutMs: Long = 850L            // 850ms silence after speech to auto-stop (between 700-1000ms)
+    var minSpeechDurationMs: Long = 280L         // 280ms minimum speech to prevent false clicks (250-350ms)
+    var initialSpeechTimeoutMs: Long = 7000L     // 7s timeout if no speech detected at all
     var maxRecordingDurationMs: Long = 35000L    // 35s max duration guard
 
     init {
@@ -114,7 +114,7 @@ class VoiceActivityRecorder private constructor(private val appContext: Context)
         }
 
         val tMicTap = System.currentTimeMillis()
-        Log.i(TAG, "[MIC_BENCHMARK] MIC_TAP: ${tMicTap}ms")
+        Log.i(TAG, "[MIC_START] timestamp=${tMicTap}ms")
         isRecording = true
 
         audioExecutor.execute {
@@ -137,22 +137,33 @@ class VoiceActivityRecorder private constructor(private val appContext: Context)
 
                 val shortBuffer = ShortArray(1024)
                 val pcmData = ByteArrayOutputStream()
+                val preSpeechRing = ArrayDeque<ByteArray>(4) // 4 frames * 64ms = ~256ms pre-speech buffer
                 var speechDetected = false
                 var speechStartTime = 0L
                 var lastSpeechTime = 0L
                 var firstSpeechLogged = false
                 val startTime = System.currentTimeMillis()
 
+                // Adaptive Noise Floor calibration
+                var ambientDbfsSum = 0.0
+                var ambientFramesCount = 0
+                var currentSpeechThreshold = silenceThresholdDbfs
+                var currentSilenceThreshold = silenceThresholdDbfs - 4.0
+
                 while (isRecording) {
                     val read = record.read(shortBuffer, 0, shortBuffer.size)
                     if (read > 0) {
                         val now = System.currentTimeMillis()
                         var sumSquares = 0.0
+                        val frameBytes = ByteArray(read * 2)
+                        var bIdx = 0
                         for (i in 0 until read) {
                             val sample = shortBuffer[i].toInt()
                             sumSquares += sample * sample
-                            pcmData.write(sample and 0xFF)
-                            pcmData.write((sample shr 8) and 0xFF)
+                            val b1 = (sample and 0xFF).toByte()
+                            val b2 = ((sample shr 8) and 0xFF).toByte()
+                            frameBytes[bIdx++] = b1
+                            frameBytes[bIdx++] = b2
                         }
 
                         val rms = sqrt(sumSquares / read)
@@ -162,58 +173,84 @@ class VoiceActivityRecorder private constructor(private val appContext: Context)
                             listener.onSpeechActive(now, dbfs, rms)
                         }
 
-                        if (dbfs > silenceThresholdDbfs) {
-                            if (!speechDetected) {
+                        // Calibrate noise floor on initial 4 frames (~256ms)
+                        if (ambientFramesCount < 4) {
+                            if (dbfs > -900.0) {
+                                ambientDbfsSum += dbfs
+                                ambientFramesCount++
+                                if (ambientFramesCount == 4) {
+                                    val avgAmbient = ambientDbfsSum / 4.0
+                                    currentSpeechThreshold = maxOf(avgAmbient + 6.0, -42.0).coerceIn(-44.0, -28.0)
+                                    currentSilenceThreshold = currentSpeechThreshold - 4.0
+                                    Log.i(TAG, "[VAD_CALIBRATION] Ambient: ${avgAmbient.roundToInt()} dBFS, SpeechThreshold: ${currentSpeechThreshold.roundToInt()} dBFS, SilenceThreshold: ${currentSilenceThreshold.roundToInt()} dBFS")
+                                }
+                            }
+                        }
+
+                        if (!speechDetected) {
+                            if (preSpeechRing.size >= 4) preSpeechRing.removeFirst()
+                            preSpeechRing.addLast(frameBytes)
+
+                            if (dbfs > currentSpeechThreshold) {
                                 if (speechStartTime == 0L) {
                                     speechStartTime = now
                                 }
                                 if (now - speechStartTime >= minSpeechDurationMs) {
                                     speechDetected = true
+                                    // Flush pre-speech buffer to capture initial consonants/syllables cleanly
+                                    for (fb in preSpeechRing) {
+                                        pcmData.write(fb)
+                                    }
+                                    preSpeechRing.clear()
+
                                     if (!firstSpeechLogged) {
                                         firstSpeechLogged = true
-                                        Log.i(TAG, "[MIC_BENCHMARK] FIRST_SPEECH_DETECTED: ${now - tMicTap}ms (RMS: ${rms.roundToInt()}, dBFS: ${dbfs.roundToInt()})")
+                                        Log.i(TAG, "[SPEECH_DETECTED] timestamp=${now}ms dbfs=${dbfs.roundToInt()} rms=${rms.roundToInt()}")
                                         mainHandler.post {
                                             listener.onFirstSpeechDetected(now, dbfs, rms)
                                         }
                                     }
+                                    lastSpeechTime = now
+                                }
+                            } else {
+                                if (speechStartTime > 0L && (now - speechStartTime < minSpeechDurationMs)) {
+                                    speechStartTime = 0L // Discard transient click/pop
+                                }
+                                if (now - startTime > initialSpeechTimeoutMs) {
+                                    Log.i(TAG, "[SPEECH_END_DETECTED] No speech detected within ${initialSpeechTimeoutMs}ms, auto-cancelling")
+                                    break
                                 }
                             }
-                            lastSpeechTime = now
                         } else {
-                            if (!speechDetected && speechStartTime > 0L && (now - speechStartTime < minSpeechDurationMs)) {
-                                // Transient noise spike (e.g. mic click); reset candidate timer
-                                speechStartTime = 0L
-                            }
+                            // Speech active or trailing
+                            pcmData.write(frameBytes)
 
-                            // 1. Trailing silence auto-stop after speech
-                            if (speechDetected && (now - lastSpeechTime > silenceTimeoutMs)) {
-                                val silenceDuration = now - lastSpeechTime
-                                Log.i(TAG, "[MIC_BENCHMARK] LAST_SPEECH_DETECTED: ${lastSpeechTime - tMicTap}ms")
-                                Log.i(TAG, "[MIC_BENCHMARK] SILENCE_THRESHOLD_REACHED: ${now - tMicTap}ms (silence: ${silenceDuration}ms after last speech)")
-                                mainHandler.post {
-                                    listener.onSilenceThresholdReached(now, silenceDuration)
+                            if (dbfs > currentSilenceThreshold) {
+                                lastSpeechTime = now
+                            } else {
+                                // Trailing silence check
+                                if (now - lastSpeechTime > silenceTimeoutMs) {
+                                    val silenceDuration = now - lastSpeechTime
+                                    Log.i(TAG, "[SPEECH_END_DETECTED] timestamp=${now}ms silenceDuration=${silenceDuration}ms")
+                                    mainHandler.post {
+                                        listener.onSilenceThresholdReached(now, silenceDuration)
+                                    }
+                                    break
                                 }
-                                break
-                            }
-
-                            // 2. Initial silence timeout (no speech detected at all within initial window)
-                            if (!speechDetected && (now - startTime > initialSpeechTimeoutMs)) {
-                                Log.i(TAG, "No speech detected within ${initialSpeechTimeoutMs}ms, auto-cancelling")
-                                break
                             }
                         }
 
-                        // 3. Safety guard against runaway recordings
+                        // Safety guard against runaway recordings
                         if (now - startTime > maxRecordingDurationMs) {
-                            Log.i(TAG, "Max recording duration (${maxRecordingDurationMs}ms) reached")
+                            Log.i(TAG, "[SPEECH_END_DETECTED] Max recording duration (${maxRecordingDurationMs}ms) reached")
                             break
                         }
                     }
                 }
 
-                // Flush trailing 400ms buffer to preserve complete final consonants/word endings
+                // Flush trailing 300ms buffer to preserve complete final consonants/word endings
                 try {
-                    val flushBuffer = ShortArray(6400)
+                    val flushBuffer = ShortArray(4800)
                     val readFlush = record.read(flushBuffer, 0, flushBuffer.size)
                     if (readFlush > 0) {
                         for (i in 0 until readFlush) {
@@ -241,6 +278,8 @@ class VoiceActivityRecorder private constructor(private val appContext: Context)
                     cacheFile.writeBytes(wavBytes)
                     wavFile = cacheFile
                 }
+
+                Log.i(TAG, "[RECORDING_FINALIZED] timestamp=${System.currentTimeMillis()}ms duration=${durationSec}s path=${wavFile?.absolutePath}")
 
                 mainHandler.post {
                     listener.onRecordingStopped(wavFile, rawPcm, speechDetected, durationSec)

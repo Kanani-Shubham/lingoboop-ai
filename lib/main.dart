@@ -25,13 +25,13 @@ Future<void> main() async {
 
   runApp(
     const ProviderScope(
-      child: LingoBoomApp(),
+      child: TalkTailsApp(),
     ),
   );
 }
 
-class LingoBoomApp extends ConsumerWidget {
-  const LingoBoomApp({super.key});
+class TalkTailsApp extends ConsumerWidget {
+  const TalkTailsApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -39,7 +39,7 @@ class LingoBoomApp extends ConsumerWidget {
     final isAuthenticated = AuthService.instance.isAuthenticated;
 
     return MaterialApp(
-      title: 'LingoBoom',
+      title: 'TalkTails',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.getTheme(
         accentColor: companionState.activePet.accentColor,
